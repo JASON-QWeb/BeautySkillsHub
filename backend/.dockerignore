@@ -1,0 +1,7 @@
+server
+*.db
+*.db-journal
+uploads/
+thumbnails/
+.env
+.agent

@@ -1,0 +1,30 @@
+services:
+  backend:
+    build: ./backend
+    container_name: skill-hub-backend
+    env_file: ./backend/.env
+    volumes:
+      - db_data:/app/data
+      - uploads:/app/uploads
+      - thumbnails:/app/thumbnails
+    environment:
+      - DB_PATH=/app/data/skill_hub.db
+      - UPLOAD_DIR=/app/uploads
+      - THUMBNAIL_DIR=/app/thumbnails
+    expose:
+      - "8080"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: skill-hub-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  db_data:
+  uploads:
+  thumbnails:
