@@ -5,11 +5,20 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
+)
+
+const (
+	githubRequestMaxAttempts = 3
+	githubRetryBaseDelay     = 200 * time.Millisecond
+	githubRetryMaxDelay      = 2 * time.Second
 )
 
 // GitHubContentClient wraps minimal GitHub contents APIs needed for sync.
@@ -53,14 +62,9 @@ func NewGitHubClient(httpClient *http.Client, baseURL, owner, repo, branch, toke
 
 func (c *GitHubClient) GetFileSHA(ctx context.Context, filePath string) (string, bool, error) {
 	endpoint := c.contentsEndpoint(filePath)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return "", false, fmt.Errorf("create github GET request: %w", err)
-	}
-	req.URL.RawQuery = "ref=" + url.QueryEscape(c.branch)
-	c.applyHeaders(req)
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.doWithRetry(ctx, http.MethodGet, endpoint, nil, func(req *http.Request) {
+		req.URL.RawQuery = "ref=" + url.QueryEscape(c.branch)
+	})
 	if err != nil {
 		return "", false, fmt.Errorf("github GET request failed: %w", err)
 	}
@@ -105,13 +109,7 @@ func (c *GitHubClient) PutFile(ctx context.Context, filePath, message string, co
 		return "", fmt.Errorf("marshal github PUT payload: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("create github PUT request: %w", err)
-	}
-	c.applyHeaders(req)
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.doWithRetry(ctx, http.MethodPut, endpoint, body, nil)
 	if err != nil {
 		return "", fmt.Errorf("github PUT request failed: %w", err)
 	}
@@ -154,13 +152,7 @@ func (c *GitHubClient) DeleteFile(ctx context.Context, filePath, message, sha st
 		return fmt.Errorf("marshal github DELETE payload: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("create github DELETE request: %w", err)
-	}
-	c.applyHeaders(req)
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.doWithRetry(ctx, http.MethodDelete, endpoint, body, nil)
 	if err != nil {
 		return fmt.Errorf("github DELETE request failed: %w", err)
 	}
@@ -175,14 +167,9 @@ func (c *GitHubClient) DeleteFile(ctx context.Context, filePath, message, sha st
 
 func (c *GitHubClient) ListDir(ctx context.Context, dirPath string) ([]string, error) {
 	endpoint := c.contentsEndpoint(dirPath)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create github GET request: %w", err)
-	}
-	req.URL.RawQuery = "ref=" + url.QueryEscape(c.branch)
-	c.applyHeaders(req)
-
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.doWithRetry(ctx, http.MethodGet, endpoint, nil, func(req *http.Request) {
+		req.URL.RawQuery = "ref=" + url.QueryEscape(c.branch)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("github GET request failed: %w", err)
 	}
@@ -252,4 +239,100 @@ func escapeGitHubPath(filePath string) string {
 		encoded = append(encoded, url.PathEscape(part))
 	}
 	return strings.Join(encoded, "/")
+}
+
+func (c *GitHubClient) doWithRetry(
+	ctx context.Context,
+	method string,
+	endpoint string,
+	body []byte,
+	configure func(*http.Request),
+) (*http.Response, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	var lastResp *http.Response
+	var lastErr error
+
+	for attempt := 1; attempt <= githubRequestMaxAttempts; attempt++ {
+		var requestBody io.Reader
+		if body != nil {
+			requestBody = bytes.NewReader(body)
+		}
+
+		req, err := http.NewRequestWithContext(ctx, method, endpoint, requestBody)
+		if err != nil {
+			return nil, fmt.Errorf("create github %s request: %w", method, err)
+		}
+		c.applyHeaders(req)
+		if configure != nil {
+			configure(req)
+		}
+
+		resp, err := c.httpClient.Do(req)
+		lastResp = resp
+		lastErr = err
+
+		if !shouldRetryGitHubRequest(resp, err) || attempt == githubRequestMaxAttempts {
+			return resp, err
+		}
+
+		if resp != nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+
+		delay := githubRetryDelay(attempt, resp)
+		if waitErr := waitWithContext(ctx, delay); waitErr != nil {
+			return nil, waitErr
+		}
+	}
+
+	return lastResp, lastErr
+}
+
+func shouldRetryGitHubRequest(resp *http.Response, err error) bool {
+	if err != nil {
+		return !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
+	}
+	if resp == nil {
+		return false
+	}
+	return resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError
+}
+
+func githubRetryDelay(attempt int, resp *http.Response) time.Duration {
+	if resp != nil {
+		if retryAfter := strings.TrimSpace(resp.Header.Get("Retry-After")); retryAfter != "" {
+			if seconds, err := strconv.Atoi(retryAfter); err == nil && seconds > 0 {
+				return time.Duration(seconds) * time.Second
+			}
+		}
+	}
+
+	if attempt <= 0 {
+		attempt = 1
+	}
+	delay := githubRetryBaseDelay * time.Duration(1<<(attempt-1))
+	if delay > githubRetryMaxDelay {
+		return githubRetryMaxDelay
+	}
+	return delay
+}
+
+func waitWithContext(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

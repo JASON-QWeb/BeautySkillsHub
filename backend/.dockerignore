@@ -2,6 +2,7 @@ server
 *.db
 *.db-journal
 uploads/
+avatars/
 thumbnails/
 .env
 .agent

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"path"
 	"strings"
 	"unicode"
@@ -12,10 +13,46 @@ func BuildSkillRepoPath(baseDir, resourceType, title, originalFilename string) (
 	base := cleanPathSegment(baseDir, "skills")
 	folder := slugifyTitle(title)
 	fileName := sanitizeFilename(originalFilename)
+	_ = resourceType // kept for backward-compatible call signature
 
 	dirPath = path.Join(base, folder)
 	filePath = path.Join(dirPath, fileName)
 	return dirPath, filePath
+}
+
+// NormalizeRepoRelativePath validates and normalizes a client-provided relative file path.
+// It rejects absolute and traversal paths and preserves Unicode path segments.
+func NormalizeRepoRelativePath(raw string) (string, error) {
+	normalized := strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/"))
+	if normalized == "" {
+		return "", fmt.Errorf("path is empty")
+	}
+	if strings.HasPrefix(normalized, "/") {
+		return "", fmt.Errorf("absolute path is not allowed")
+	}
+
+	cleaned := path.Clean(normalized)
+	if cleaned == "." || cleaned == "" || cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return "", fmt.Errorf("invalid relative path")
+	}
+
+	parts := strings.Split(cleaned, "/")
+	safeParts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "." || part == ".." {
+			return "", fmt.Errorf("invalid path segment")
+		}
+		if strings.Contains(part, ":") {
+			return "", fmt.Errorf("invalid path segment")
+		}
+		if strings.ContainsRune(part, 0) {
+			return "", fmt.Errorf("invalid path segment")
+		}
+		safeParts = append(safeParts, part)
+	}
+
+	return path.Join(safeParts...), nil
 }
 
 func normalizeResourceType(resourceType string) string {

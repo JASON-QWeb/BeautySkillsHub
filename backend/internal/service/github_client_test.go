@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -115,5 +116,41 @@ func TestGitHubClient_PutFile(t *testing.T) {
 	}
 	if !strings.Contains(url, "/blob/main/a.txt") {
 		t.Fatalf("expected blob url, got %q", url)
+	}
+}
+
+func TestGitHubClient_GetFileSHA_RetriesTransientFailures(t *testing.T) {
+	var attempts atomic.Int32
+	httpClient := &http.Client{
+		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			n := attempts.Add(1)
+			if n < 3 {
+				return &http.Response{
+					StatusCode: http.StatusBadGateway,
+					Body:       io.NopCloser(strings.NewReader("temporary")),
+					Header:     make(http.Header),
+				}, nil
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"sha":"retry-ok"}`)),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+
+	client := NewGitHubClient(httpClient, "https://api.github.com", "owner", "repo", "main", "test-token")
+	sha, exists, err := client.GetFileSHA(context.Background(), "skills/skill/retry/file.txt")
+	if err != nil {
+		t.Fatalf("expected retry success, got error %v", err)
+	}
+	if !exists {
+		t.Fatal("expected file to exist after retry")
+	}
+	if sha != "retry-ok" {
+		t.Fatalf("expected sha retry-ok, got %q", sha)
+	}
+	if got := attempts.Load(); got != 3 {
+		t.Fatalf("expected 3 attempts, got %d", got)
 	}
 }

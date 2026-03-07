@@ -1,0 +1,11 @@
+@import './fonts.css';
+@import './variables.css';
+@import './base.css';
+@import './components.css';
+@import './components/dialog.css';
+@import './navbar.css';
+@import './home.css';
+@import './detail.css';
+@import './upload.css';
+@import './profile.css';
+@import './widgets.css';

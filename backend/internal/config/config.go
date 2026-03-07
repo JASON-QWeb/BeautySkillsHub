@@ -2,6 +2,7 @@ package config
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"strings"
 )
@@ -21,6 +22,12 @@ type Config struct {
 	GitHubRepo        string
 	GitHubBranch      string
 	GitHubBaseDir     string
+
+	RedisAddr                 string
+	RedisPassword             string
+	RedisDB                   int
+	AISkillsCacheKey          string
+	AISkillsInvalidateChannel string
 }
 
 func Load() *Config {
@@ -42,6 +49,12 @@ func Load() *Config {
 		GitHubRepo:        getEnv("GITHUB_REPO", ""),
 		GitHubBranch:      getEnv("GITHUB_BRANCH", "main"),
 		GitHubBaseDir:     getEnv("GITHUB_BASE_DIR", "skills"),
+
+		RedisAddr:                 getEnv("REDIS_ADDR", ""),
+		RedisPassword:             getEnv("REDIS_PASSWORD", ""),
+		RedisDB:                   getEnvInt("REDIS_DB", 0),
+		AISkillsCacheKey:          getEnv("AI_SKILLS_CACHE_KEY", "ai:skills_context:v1"),
+		AISkillsInvalidateChannel: getEnv("AI_SKILLS_INVALIDATE_CHANNEL", "ai:skills_context:invalidate"),
 	}
 	return cfg
 }
@@ -123,4 +136,18 @@ func getEnvBool(key string, fallback bool) bool {
 	default:
 		return fallback
 	}
+}
+
+func getEnvInt(key string, fallback int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+
+	var out int
+	_, err := fmt.Sscanf(v, "%d", &out)
+	if err != nil {
+		return fallback
+	}
+	return out
 }

@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { uploadSkill, RESOURCE_TYPES } from '../services/api'
+import { useDialog } from '../contexts/DialogContext'
 
 const CATEGORIES: Record<string, string[]> = {
     skill: ['自动化', '数据处理', '网络工具', 'AI/ML', '开发工具', '系统管理', '安全', '其他'],
@@ -16,6 +17,7 @@ interface UploadModalProps {
 
 function UploadModal({ isOpen, onClose }: UploadModalProps) {
     const navigate = useNavigate()
+    const { showAlert } = useDialog()
 
     const [resourceType, setResourceType] = useState('skill')
 
@@ -79,8 +81,14 @@ function UploadModal({ isOpen, onClose }: UploadModalProps) {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
 
-        if (!name.trim()) return alert('请输入名称')
-        if (!hasFiles) return alert(uploadMode === 'file' ? '请上传文件' : '请选择文件夹')
+        if (!name.trim()) {
+            await showAlert('请输入名称')
+            return
+        }
+        if (!hasFiles) {
+            await showAlert(uploadMode === 'file' ? '请上传文件' : '请选择文件夹')
+            return
+        }
 
         setUploading(true)
         setReviewStatus('pending')

@@ -12,14 +12,14 @@ RUN CGO_ENABLED=1 go build -o server ./cmd/server/
 
 FROM alpine:latest
 
-RUN apk add --no-cache libc6-compat
+RUN apk add --no-cache libc6-compat ca-certificates
 
 WORKDIR /app
 
 COPY --from=builder /app/server .
 COPY .env.example .env.example
 
-RUN mkdir -p uploads thumbnails
+RUN mkdir -p data uploads thumbnails avatars
 
 EXPOSE 8080
 

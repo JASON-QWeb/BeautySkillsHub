@@ -1,4 +1,11 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: skill-hub-redis
+    restart: unless-stopped
+    expose:
+      - "6379"
+
   backend:
     build: ./backend
     container_name: skill-hub-backend
@@ -6,11 +13,15 @@ services:
     volumes:
       - db_data:/app/data
       - uploads:/app/uploads
+      - avatars:/app/avatars
       - thumbnails:/app/thumbnails
     environment:
       - DB_PATH=/app/data/skill_hub.db
       - UPLOAD_DIR=/app/uploads
       - THUMBNAIL_DIR=/app/thumbnails
+      - REDIS_ADDR=redis:6379
+    depends_on:
+      - redis
     expose:
       - "8080"
     restart: unless-stopped
@@ -27,4 +38,5 @@ services:
 volumes:
   db_data:
   uploads:
+  avatars:
   thumbnails:

@@ -1,0 +1,144 @@
+:root,
+[data-theme="light"] {
+  --bg-primary: #eceff4;
+  --bg-secondary: #f6f7fa;
+  --bg-card: rgba(255, 255, 255, 0.72);
+  --bg-card-solid: #ffffff;
+  --bg-glass: rgba(255, 255, 255, 0.58);
+  --bg-glass-hover: rgba(255, 255, 255, 0.9);
+  --bg-elevated: rgba(255, 255, 255, 0.88);
+
+  --text-primary: #1f2a44;
+  --text-secondary: #50627f;
+  --text-muted: #7f8ea6;
+
+  --accent-primary: #f3c614;
+  --accent-secondary: #2e67ff;
+  --accent-gradient: linear-gradient(135deg, #4f83e8, #5e5fda);
+  --accent-glow: rgba(95, 103, 220, 0.2);
+
+  --success: #23b26d;
+  --warning: #f0b90b;
+  --danger: #ea5455;
+
+  --border: rgba(132, 151, 182, 0.18);
+  --border-hover: rgba(100, 120, 153, 0.3);
+  --border-active: rgba(88, 110, 144, 0.46);
+
+  --radial-g1: rgba(255, 255, 255, 0.9);
+  --radial-g2: rgba(206, 219, 241, 0.68);
+  --radial-g3: rgba(245, 200, 96, 0.14);
+
+  --font-family: 'Fira Sans', sans-serif;
+  --font-heading: 'Didact Gothic', 'Fira Sans', sans-serif;
+  --font-mono: 'Fira Code', monospace;
+
+  --shadow-sm: 0 4px 14px rgba(55, 74, 103, 0.08);
+  --shadow-md: 0 12px 32px rgba(36, 52, 75, 0.1);
+  --shadow-lg: 0 22px 48px rgba(31, 44, 65, 0.15);
+  --shadow-glow: 0 0 24px rgba(95, 103, 220, 0.26);
+
+  --card-glass: rgba(255, 255, 255, 0.74);
+  --card-glass-border: rgba(255, 255, 255, 0.62);
+  --card-solid-dark: #282a32;
+  --card-solid-dark-border: rgba(255, 255, 255, 0.08);
+
+  --pill-bg: #e4e9f1;
+  --pill-active-bg: #ffffff;
+  --pill-text: #5f708c;
+  --pill-active-text: #232f46;
+
+  --input-bg: rgba(249, 250, 252, 0.88);
+  --input-border: rgba(112, 130, 161, 0.22);
+  --input-focus-border: #4f83e8;
+
+  --login-left-bg: #f3f4f6;
+  --login-left-pattern-1: rgba(17, 24, 39, 0.08);
+  --login-left-pattern-2: rgba(17, 24, 39, 0.05);
+  --login-left-text: #111827;
+  --login-submit-bg: #111827;
+  --login-submit-bg-hover: #000000;
+  --login-submit-border: #111827;
+  --login-submit-text: #ffffff;
+  --login-submit-shadow: rgba(17, 24, 39, 0.24);
+
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+  --space-3xl: 64px;
+
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 22px;
+  --radius-2xl: 28px;
+  --radius-full: 999px;
+
+  --transition-fast: 0.16s cubic-bezier(0.2, 0.7, 0.2, 1);
+  --transition-normal: 0.28s cubic-bezier(0.2, 0.7, 0.2, 1);
+  --transition-slow: 0.42s cubic-bezier(0.2, 0.7, 0.2, 1);
+  --transition-panel: 0.62s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+[data-theme="dark"] {
+  --bg-primary: #0a0e15;
+  --bg-secondary: #0e141f;
+  --bg-card: rgba(17, 23, 34, 0.78);
+  --bg-card-solid: #111a28;
+  --bg-glass: rgba(255, 255, 255, 0.05);
+  --bg-glass-hover: rgba(255, 255, 255, 0.11);
+  --bg-elevated: rgba(19, 26, 39, 0.92);
+
+  --text-primary: #ebf0fb;
+  --text-secondary: #a8b8d2;
+  --text-muted: #7284a1;
+
+  --accent-primary: #f8cc2a;
+  --accent-secondary: #6b95ff;
+  --accent-gradient: linear-gradient(135deg, #547ff0, #7653ea);
+  --accent-glow: rgba(92, 117, 255, 0.25);
+
+  --success: #31cc85;
+  --warning: #f8cc2a;
+  --danger: #f97073;
+
+  --border: rgba(159, 181, 219, 0.15);
+  --border-hover: rgba(180, 199, 231, 0.28);
+  --border-active: rgba(193, 214, 249, 0.38);
+
+  --radial-g1: rgba(26, 38, 58, 0.4);
+  --radial-g2: rgba(43, 55, 86, 0.3);
+  --radial-g3: rgba(96, 84, 38, 0.18);
+
+  --shadow-sm: 0 5px 16px rgba(0, 0, 0, 0.34);
+  --shadow-md: 0 14px 36px rgba(0, 0, 0, 0.46);
+  --shadow-lg: 0 24px 52px rgba(0, 0, 0, 0.58);
+  --shadow-glow: 0 0 22px rgba(96, 117, 255, 0.34);
+
+  --card-glass: rgba(16, 22, 34, 0.76);
+  --card-glass-border: rgba(143, 165, 199, 0.16);
+  --card-solid-dark: #090e17;
+  --card-solid-dark-border: rgba(255, 255, 255, 0.06);
+
+  --pill-bg: rgba(104, 128, 166, 0.14);
+  --pill-active-bg: rgba(255, 255, 255, 0.12);
+  --pill-text: #9eb1d1;
+  --pill-active-text: #f0f4ff;
+
+  --input-bg: rgba(17, 24, 38, 0.76);
+  --input-border: rgba(122, 145, 182, 0.34);
+  --input-focus-border: #6b95ff;
+
+  --login-left-bg: #090b0f;
+  --login-left-pattern-1: rgba(255, 255, 255, 0.08);
+  --login-left-pattern-2: rgba(255, 255, 255, 0.05);
+  --login-left-text: #f3f4f6;
+  --login-submit-bg: #f3f4f6;
+  --login-submit-bg-hover: #ffffff;
+  --login-submit-border: rgba(255, 255, 255, 0.65);
+  --login-submit-text: #111827;
+  --login-submit-shadow: rgba(255, 255, 255, 0.22);
+}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -13,10 +14,11 @@ import (
 )
 
 const (
-	GitHubSyncStatusDisabled = "disabled"
-	GitHubSyncStatusPending  = "pending"
-	GitHubSyncStatusSuccess  = "success"
-	GitHubSyncStatusFailed   = "failed"
+	GitHubSyncStatusDisabled   = "disabled"
+	GitHubSyncStatusNotStarted = "not_started"
+	GitHubSyncStatusPending    = "pending"
+	GitHubSyncStatusSuccess    = "success"
+	GitHubSyncStatusFailed     = "failed"
 )
 
 type GitHubSyncResult struct {
@@ -24,6 +26,7 @@ type GitHubSyncResult struct {
 	Path   string
 	URL    string
 	Error  string
+	Files  []string
 }
 
 type GitHubSyncService struct {
@@ -82,18 +85,21 @@ func (s *GitHubSyncService) SyncUploadedSkill(
 		}
 	}
 
-	_, targetPath := BuildSkillRepoPath(s.cfg.GitHubBaseDir, resourceType, skillName, originalFilename)
-
-	_, exists, err := s.client.GetFileSHA(ctx, targetPath)
+	dirPath, targetPath := BuildSkillRepoPath(s.cfg.GitHubBaseDir, resourceType, skillName, originalFilename)
+	existingPaths, err := s.client.ListDir(ctx, dirPath)
 	if err != nil {
 		return GitHubSyncResult{
 			Status: GitHubSyncStatusFailed,
-			Path:   targetPath,
+			Path:   dirPath,
 			Error:  fmt.Sprintf("检查 GitHub 路径失败: %v", err),
 		}
 	}
-	if exists {
-		targetPath = appendTimestampSuffix(targetPath, s.nowFn())
+	if len(existingPaths) > 0 {
+		return GitHubSyncResult{
+			Status: GitHubSyncStatusFailed,
+			Path:   dirPath,
+			Error:  "GitHub 目录已存在，请修改技能名称后重试",
+		}
 	}
 
 	commitMessage := fmt.Sprintf("Add skill: %s", strings.TrimSpace(skillName))
@@ -101,15 +107,16 @@ func (s *GitHubSyncService) SyncUploadedSkill(
 	if err != nil {
 		return GitHubSyncResult{
 			Status: GitHubSyncStatusFailed,
-			Path:   targetPath,
+			Path:   dirPath,
 			Error:  fmt.Sprintf("上传到 GitHub 失败: %v", err),
 		}
 	}
 
 	return GitHubSyncResult{
 		Status: GitHubSyncStatusSuccess,
-		Path:   targetPath,
+		Path:   dirPath,
 		URL:    url,
+		Files:  []string{targetPath},
 	}
 }
 
@@ -123,16 +130,54 @@ func (s *GitHubSyncService) DeleteSkillFromGitHub(ctx context.Context, githubPat
 		return nil
 	}
 
-	// Try to get SHA directly — if it succeeds, the path is a file
-	_, exists, err := s.client.GetFileSHA(ctx, githubPath)
+	// Try to get SHA directly — if it succeeds, delete the file only.
+	sha, exists, err := s.client.GetFileSHA(ctx, githubPath)
 	if err == nil && exists {
-		// It's a file path — delete all files in the parent directory
-		dirPath := pathpkg.Dir(githubPath)
-		return s.deleteAllInDir(ctx, dirPath)
+		return s.client.DeleteFile(ctx, githubPath, fmt.Sprintf("Delete skill file: %s", githubPath), sha)
+	}
+	if err != nil {
+		return fmt.Errorf("检查 GitHub 路径失败: %w", err)
 	}
 
 	// It's a directory path — list and delete all files in it
 	return s.deleteAllInDir(ctx, githubPath)
+}
+
+// DeleteSkillFilesFromGitHub deletes files listed in manifest exactly.
+func (s *GitHubSyncService) DeleteSkillFilesFromGitHub(ctx context.Context, files []string) error {
+	if s.cfg == nil || !s.cfg.GitHubSyncEnabled || s.client == nil {
+		return nil
+	}
+	if len(files) == 0 {
+		return nil
+	}
+
+	var errs []string
+	for _, f := range files {
+		clean := strings.TrimSpace(f)
+		if clean == "" {
+			continue
+		}
+		if _, err := NormalizeRepoRelativePath(clean); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: invalid path", clean))
+			continue
+		}
+		sha, exists, err := s.client.GetFileSHA(ctx, clean)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", clean, err))
+			continue
+		}
+		if !exists {
+			continue
+		}
+		if err := s.client.DeleteFile(ctx, clean, fmt.Sprintf("Delete skill file: %s", clean), sha); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", clean, err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("部分文件删除失败: %s", strings.Join(errs, "; "))
+	}
+	return nil
 }
 
 func (s *GitHubSyncService) deleteAllInDir(ctx context.Context, dirPath string) error {
@@ -197,9 +242,25 @@ func (s *GitHubSyncService) SyncUploadedFolder(
 	base := cleanPathSegment(s.cfg.GitHubBaseDir, "skills")
 	folder := slugifyTitle(skillName)
 	dirPath := pathpkg.Join(base, folder)
+	existingPaths, err := s.client.ListDir(ctx, dirPath)
+	if err != nil {
+		return GitHubSyncResult{
+			Status: GitHubSyncStatusFailed,
+			Path:   dirPath,
+			Error:  fmt.Sprintf("检查 GitHub 路径失败: %v", err),
+		}
+	}
+	if len(existingPaths) > 0 {
+		return GitHubSyncResult{
+			Status: GitHubSyncStatusFailed,
+			Path:   dirPath,
+			Error:  "GitHub 目录已存在，请修改技能名称后重试",
+		}
+	}
 
 	var lastURL string
 	var errors []string
+	uploadedPaths := make([]string, 0, len(files))
 
 	for _, fe := range files {
 		content, err := os.ReadFile(fe.LocalPath)
@@ -208,37 +269,38 @@ func (s *GitHubSyncService) SyncUploadedFolder(
 			continue
 		}
 
-		targetPath := pathpkg.Join(dirPath, sanitizeFilename(fe.RelativePath))
-		// Preserve subdirectory structure for nested files
-		if strings.Contains(fe.RelativePath, "/") {
-			parts := strings.Split(fe.RelativePath, "/")
-			for i, p := range parts {
-				parts[i] = sanitizeFilename(p)
-			}
-			targetPath = pathpkg.Join(dirPath, pathpkg.Join(parts...))
+		normalizedRel, err := NormalizeRepoRelativePath(fe.RelativePath)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("非法文件路径 %s: %v", fe.RelativePath, err))
+			continue
 		}
+		targetPath := pathpkg.Join(dirPath, normalizedRel)
 
-		sha, exists, err := s.client.GetFileSHA(ctx, targetPath)
+		_, exists, err := s.client.GetFileSHA(ctx, targetPath)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("检查 GitHub 路径失败 %s: %v", targetPath, err))
 			continue
 		}
-
-		commitMessage := fmt.Sprintf("Add skill: %s - %s", strings.TrimSpace(skillName), fe.RelativePath)
-		existingSHA := ""
 		if exists {
-			existingSHA = sha
+			errors = append(errors, fmt.Sprintf("路径已存在 %s，请修改技能名称后重试", targetPath))
+			continue
 		}
 
-		url, err := s.client.PutFile(ctx, targetPath, commitMessage, content, existingSHA)
+		commitMessage := fmt.Sprintf("Add skill: %s - %s", strings.TrimSpace(skillName), fe.RelativePath)
+		url, err := s.client.PutFile(ctx, targetPath, commitMessage, content, "")
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("上传失败 %s: %v", fe.RelativePath, err))
 			continue
 		}
 		lastURL = url
+		uploadedPaths = append(uploadedPaths, targetPath)
 	}
 
-	if len(errors) > 0 && len(errors) == len(files) {
+	if len(errors) > 0 {
+		rollbackErr := s.DeleteSkillFilesFromGitHub(ctx, uploadedPaths)
+		if rollbackErr != nil {
+			errors = append(errors, fmt.Sprintf("回滚失败: %v", rollbackErr))
+		}
 		return GitHubSyncResult{
 			Status: GitHubSyncStatusFailed,
 			Path:   dirPath,
@@ -250,9 +312,7 @@ func (s *GitHubSyncService) SyncUploadedFolder(
 		Status: GitHubSyncStatusSuccess,
 		Path:   dirPath,
 		URL:    lastURL,
-	}
-	if len(errors) > 0 {
-		result.Error = fmt.Sprintf("部分文件上传失败: %s", strings.Join(errors, "; "))
+		Files:  uploadedPaths,
 	}
 	return result
 }
@@ -261,4 +321,27 @@ func appendTimestampSuffix(filePath string, ts time.Time) string {
 	ext := pathpkg.Ext(filePath)
 	prefix := strings.TrimSuffix(filePath, ext)
 	return fmt.Sprintf("%s_%s%s", prefix, ts.Format("20060102_150405"), ext)
+}
+
+func MarshalGitHubFiles(files []string) string {
+	if len(files) == 0 {
+		return ""
+	}
+	b, err := json.Marshal(files)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func UnmarshalGitHubFiles(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var files []string
+	if err := json.Unmarshal([]byte(raw), &files); err != nil {
+		return nil
+	}
+	return files
 }

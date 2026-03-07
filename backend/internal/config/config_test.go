@@ -119,6 +119,11 @@ func TestLoad_GitHubDefaults(t *testing.T) {
 	t.Setenv("GITHUB_REPO", "")
 	t.Setenv("GITHUB_BRANCH", "")
 	t.Setenv("GITHUB_BASE_DIR", "")
+	t.Setenv("REDIS_ADDR", "")
+	t.Setenv("REDIS_PASSWORD", "")
+	t.Setenv("REDIS_DB", "")
+	t.Setenv("AI_SKILLS_CACHE_KEY", "")
+	t.Setenv("AI_SKILLS_INVALIDATE_CHANNEL", "")
 
 	wd, err := os.Getwd()
 	if err != nil {
@@ -140,5 +145,14 @@ func TestLoad_GitHubDefaults(t *testing.T) {
 	}
 	if cfg.GitHubBaseDir != "skills" {
 		t.Fatalf("expected default base dir skills, got %q", cfg.GitHubBaseDir)
+	}
+	if cfg.RedisDB != 0 {
+		t.Fatalf("expected default redis db 0, got %d", cfg.RedisDB)
+	}
+	if cfg.AISkillsCacheKey != "ai:skills_context:v1" {
+		t.Fatalf("expected default cache key, got %q", cfg.AISkillsCacheKey)
+	}
+	if cfg.AISkillsInvalidateChannel != "ai:skills_context:invalidate" {
+		t.Fatalf("expected default invalidate channel, got %q", cfg.AISkillsInvalidateChannel)
 	}
 }
