@@ -5,9 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
-	"time"
 
 	"skill-hub/internal/config"
 )
@@ -98,7 +96,7 @@ func TestGitHubSyncService_Success(t *testing.T) {
 	}
 }
 
-func TestGitHubSyncService_ConflictRequiresRename(t *testing.T) {
+func TestGitHubSyncService_OverwritesExistingDirectory(t *testing.T) {
 	cfg := &config.Config{
 		GitHubSyncEnabled: true,
 		GitHubBaseDir:     "skills",
@@ -107,15 +105,14 @@ func TestGitHubSyncService_ConflictRequiresRename(t *testing.T) {
 		GitHubRepo:        "repo",
 	}
 	fake := &fakeGitHubClient{
-		existing: map[string]bool{},
+		existing: map[string]bool{
+			"skills/my-skill/existing.md": true,
+		},
 		dirs: map[string][]string{
 			"skills/my-skill": {"skills/my-skill/existing.md"},
 		},
 	}
 	svc := NewGitHubSyncService(cfg, fake)
-	svc.nowFn = func() time.Time {
-		return time.Date(2026, 3, 5, 22, 30, 0, 0, time.UTC)
-	}
 
 	tmp := t.TempDir()
 	localFile := filepath.Join(tmp, "a.txt")
@@ -124,14 +121,14 @@ func TestGitHubSyncService_ConflictRequiresRename(t *testing.T) {
 	}
 
 	result := svc.SyncUploadedSkill(context.Background(), "My Skill", "skill", "a.txt", localFile)
-	if result.Status != GitHubSyncStatusFailed {
-		t.Fatalf("expected failed status, got %q", result.Status)
+	if result.Status != GitHubSyncStatusSuccess {
+		t.Fatalf("expected success status, got %q (error=%q)", result.Status, result.Error)
 	}
-	if !strings.Contains(result.Error, "已存在") {
-		t.Fatalf("expected conflict error, got %q", result.Error)
+	if fake.putPath != "skills/my-skill/a.txt" {
+		t.Fatalf("expected upload to target file, got %q", fake.putPath)
 	}
-	if fake.putPath != "" {
-		t.Fatalf("expected no upload when conflict, got %q", fake.putPath)
+	if len(fake.deleted) != 1 || fake.deleted[0] != "skills/my-skill/existing.md" {
+		t.Fatalf("expected stale file deleted, got %#v", fake.deleted)
 	}
 }
 
@@ -215,5 +212,60 @@ func TestDeleteSkillFilesFromGitHub_DeletesManifestEntries(t *testing.T) {
 	}
 	if len(fake.deleted) != 2 {
 		t.Fatalf("expected two deleted files, got %#v", fake.deleted)
+	}
+}
+
+func TestGitHubSyncService_SyncUploadedFolderReplacesStaleFiles(t *testing.T) {
+	cfg := &config.Config{
+		GitHubSyncEnabled: true,
+		GitHubBaseDir:     "skills",
+		GitHubToken:       "token",
+		GitHubOwner:       "owner",
+		GitHubRepo:        "repo",
+	}
+	fake := &fakeGitHubClient{
+		existing: map[string]bool{
+			"skills/my-skill/a.txt": true,
+			"skills/my-skill/b.txt": true,
+			"skills/my-skill/c.txt": true,
+		},
+		dirs: map[string][]string{
+			"skills/my-skill": {
+				"skills/my-skill/a.txt",
+				"skills/my-skill/b.txt",
+				"skills/my-skill/c.txt",
+			},
+		},
+	}
+	svc := NewGitHubSyncService(cfg, fake)
+
+	tmp := t.TempDir()
+	localA := filepath.Join(tmp, "a.txt")
+	localD := filepath.Join(tmp, "d.txt")
+	if err := os.WriteFile(localA, []byte("updated"), 0o600); err != nil {
+		t.Fatalf("write a.txt: %v", err)
+	}
+	if err := os.WriteFile(localD, []byte("new"), 0o600); err != nil {
+		t.Fatalf("write d.txt: %v", err)
+	}
+
+	result := svc.SyncUploadedFolder(context.Background(), "My Skill", "skill", []SyncFileEntry{
+		{LocalPath: localA, RelativePath: "a.txt"},
+		{LocalPath: localD, RelativePath: "d.txt"},
+	})
+	if result.Status != GitHubSyncStatusSuccess {
+		t.Fatalf("expected success status, got %q (error=%q)", result.Status, result.Error)
+	}
+
+	if len(result.Files) != 2 {
+		t.Fatalf("expected two synced files, got %#v", result.Files)
+	}
+
+	deleted := map[string]bool{}
+	for _, p := range fake.deleted {
+		deleted[p] = true
+	}
+	if !deleted["skills/my-skill/b.txt"] || !deleted["skills/my-skill/c.txt"] {
+		t.Fatalf("expected stale files b/c deleted, got %#v", fake.deleted)
 	}
 }

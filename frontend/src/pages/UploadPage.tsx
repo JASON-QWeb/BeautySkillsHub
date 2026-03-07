@@ -1,1 +1,1 @@
-export { default } from '../features/upload/UploadPage'
+export { default } from '../features/upload/index/ResourceUploadRouter'

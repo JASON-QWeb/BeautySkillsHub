@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useI18n } from '../../i18n/I18nProvider'
 import { RESOURCE_TYPES, Skill, fetchSkill, submitHumanReview, getDownloadUrl } from '../../services/api'
 import { useDialog } from '../../contexts/DialogContext'
+import FlowStepIcon from '../../components/FlowStepIcon'
 import '../../styles/upload.css'
 
 type ReviewFileStatus = 'queued' | 'running' | 'passed' | 'failed'
@@ -265,17 +266,17 @@ function ReviewPage() {
 
             <div className="upload-steps single-line">
                 <div className={`step ${step >= 1 ? 'active' : ''}`}>
-                    <div className="step-circle">↥</div>
+                    <div className="step-circle"><FlowStepIcon kind="upload" /></div>
                     <span className="step-label">{t('upload.stepUser')}</span>
                 </div>
                 <div className={`step-connector ${step >= 2 ? 'active' : ''}`} />
                 <div className={`step ${step >= 2 ? 'active' : ''}`}>
-                    <div className="step-circle">◎</div>
+                    <div className="step-circle"><FlowStepIcon kind="ai" /></div>
                     <span className="step-label">{t('upload.stepAi')}</span>
                 </div>
                 <div className={`step-connector ${step >= 3 ? 'active' : ''}`} />
                 <div className={`step ${step >= 3 ? 'active' : ''}`}>
-                    <div className="step-circle">◍</div>
+                    <div className="step-circle"><FlowStepIcon kind="human" /></div>
                     <span className="step-label">{t('upload.stepHuman')}</span>
                 </div>
             </div>
@@ -460,7 +461,7 @@ function ReviewPage() {
                                         }, 700)
 
                                         try {
-                                            const updated = await submitHumanReview(skill.id, true)
+                                            const updated = await submitHumanReview(skill.id, skill.resource_type || 'skill', true)
                                             if (humanProgressTimerRef.current !== null) {
                                                 window.clearTimeout(humanProgressTimerRef.current)
                                                 humanProgressTimerRef.current = null

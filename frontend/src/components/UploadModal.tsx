@@ -124,7 +124,7 @@ function UploadModal({ isOpen, onClose }: UploadModalProps) {
             if (result.approved) {
                 setTimeout(() => {
                     handleClose()
-                    navigate(`/skill/${result.skill.id}`)
+                    navigate(`/resource/${result.skill.resource_type || resourceType}/${result.skill.id}`)
                 }, 1500)
             }
         } catch (err) {

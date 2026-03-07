@@ -18,7 +18,8 @@ func NewSkillService(db *gorm.DB) *SkillService {
 }
 
 // ListSkills returns all AI-approved skills that are either pending human review or fully published.
-func (s *SkillService) ListSkills(search, category, resourceType string, page, pageSize int) ([]model.Skill, int64, error) {
+// The legacy category argument is intentionally ignored; filtering is keyword-based.
+func (s *SkillService) ListSkills(search, _ string, resourceType string, page, pageSize int) ([]model.Skill, int64, error) {
 	var skills []model.Skill
 	var total int64
 
@@ -30,13 +31,9 @@ func (s *SkillService) ListSkills(search, category, resourceType string, page, p
 		query = query.Where("resource_type = ?", resourceType)
 	}
 
-	if category != "" {
-		query = query.Where("category = ?", category)
-	}
-
 	if search != "" {
 		like := "%" + search + "%"
-		query = query.Where("name LIKE ? OR description LIKE ? OR category LIKE ? OR tags LIKE ?", like, like, like, like)
+		query = query.Where("name LIKE ? OR description LIKE ? OR tags LIKE ?", like, like, like)
 	}
 
 	if err := query.Count(&total).Error; err != nil {

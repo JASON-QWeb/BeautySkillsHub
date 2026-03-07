@@ -9,8 +9,8 @@
 }
 
 .skill-card.pending-review {
-  filter: grayscale(0.86);
-  border-color: rgba(117, 131, 153, 0.5);
+  border-color: rgba(243, 198, 20, 0.44);
+  box-shadow: 0 8px 24px rgba(243, 198, 20, 0.12);
 }
 
 .skill-card:hover {
@@ -25,6 +25,7 @@
   height: 190px;
   object-fit: cover;
   border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .skill-card-thumb-fallback {
@@ -81,9 +82,9 @@
 }
 
 .skill-card.pending-review .skill-card-publish-tag {
-  background: rgba(53, 66, 85, 0.78);
-  border: 1px solid rgba(142, 157, 181, 0.6);
-  color: #d7e2f5;
+  background: rgba(243, 198, 20, 0.2);
+  border: 1px solid rgba(243, 198, 20, 0.44);
+  color: #f4f8ff;
 }
 
 .skill-card-body {
@@ -110,9 +111,34 @@
   background: rgba(124, 143, 174, 0.14);
 }
 
-.skill-card-edit {
-  font-size: 0.9rem;
+.skill-card-edit-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.skill-card-edit-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.skill-card-edit-btn:hover {
+  border-color: var(--border-hover);
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.skill-card-edit-placeholder {
+  width: 28px;
+  height: 28px;
 }
 
 .skill-card-title {
@@ -191,18 +217,30 @@
 }
 
 .metric {
-  font-size: 0.78rem;
-  font-weight: 700;
+  font-size: 0.76rem;
+  font-weight: 800;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 26px;
+  height: 28px;
   line-height: 1;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  padding: 0 8px;
+  gap: 4px;
+}
+
+.metric svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 
 .metric-download {
-  color: #1aa86a;
-  padding: 0 4px;
+  color: #21aa72;
+  background: rgba(33, 170, 114, 0.12);
+  border-color: rgba(33, 170, 114, 0.22);
+  padding-right: 10px;
 }
 
 .metric-star {
@@ -210,23 +248,22 @@
 }
 
 .metric-favorite-btn {
-  border: 1px solid transparent;
-  background: transparent;
+  border-color: rgba(233, 113, 143, 0.18);
+  background: rgba(233, 113, 143, 0.08);
   color: #afbccf;
-  border-radius: 6px;
-  padding: 0 6px;
   cursor: pointer;
-  font-size: 0.95rem;
   transition: all var(--transition-fast);
 }
 
 .metric-favorite-btn:hover:not(:disabled) {
-  background: rgba(239, 71, 111, 0.08);
+  background: rgba(239, 71, 111, 0.16);
   color: #ef476f;
 }
 
 .metric-favorite-btn.favorited {
   color: #ef476f;
+  border-color: rgba(239, 71, 111, 0.28);
+  background: rgba(239, 71, 111, 0.14);
 }
 
 .metric-favorite-btn:disabled {
@@ -235,26 +272,42 @@
 }
 
 .metric-star-btn {
-  border: 1px solid transparent;
-  background: transparent;
+  width: 28px;
+  padding: 0;
+  border-color: rgba(223, 177, 13, 0.22);
+  background: rgba(223, 177, 13, 0.1);
   color: #afbccf;
-  border-radius: 6px;
-  padding: 0 6px;
   cursor: pointer;
   transition: all var(--transition-fast);
-  gap: 4px;
 }
 
 .metric-star-btn:hover:not(:disabled) {
-  background: rgba(223, 177, 13, 0.08);
+  background: rgba(223, 177, 13, 0.2);
   color: #dfb10d;
 }
 
 .metric-star-btn.liked {
   color: #dfb10d;
+  border-color: rgba(223, 177, 13, 0.34);
+  background: rgba(223, 177, 13, 0.2);
 }
 
 .metric-star-btn:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+[data-theme="dark"] .skill-card.pending-review {
+  border-color: rgba(248, 204, 42, 0.5);
+  box-shadow: 0 12px 30px rgba(248, 204, 42, 0.18);
+}
+
+[data-theme="dark"] .skill-card-edit-btn {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+[data-theme="dark"] .metric-download {
+  color: #71deb0;
+  background: rgba(49, 204, 133, 0.16);
+  border-color: rgba(49, 204, 133, 0.26);
 }

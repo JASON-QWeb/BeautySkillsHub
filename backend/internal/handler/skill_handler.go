@@ -61,8 +61,9 @@ func normalizeThumbnailURL(url string) string {
 	return "/api/thumbnails/" + url
 }
 
-func isSkillResourceType(resourceType string) bool {
-	return strings.EqualFold(strings.TrimSpace(resourceType), "skill")
+func isReviewedResourceType(resourceType string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(resourceType))
+	return normalized == "skill" || normalized == "rules"
 }
 
 func (h *SkillHandler) getSkillResource(id uint) (*model.Skill, error) {
@@ -70,7 +71,7 @@ func (h *SkillHandler) getSkillResource(id uint) (*model.Skill, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !isSkillResourceType(skill.ResourceType) {
+	if !isReviewedResourceType(skill.ResourceType) {
 		return nil, gorm.ErrRecordNotFound
 	}
 	return skill, nil

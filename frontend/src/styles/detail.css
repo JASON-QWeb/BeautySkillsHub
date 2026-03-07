@@ -80,6 +80,15 @@
   margin-bottom: 24px;
 }
 
+.detail-hero-desc {
+  margin: 0 0 20px;
+  font-size: 1.16rem;
+  line-height: 1.75;
+  color: var(--text-secondary);
+  font-weight: 600;
+  max-width: 920px;
+}
+
 .detail-tag {
   font-size: 0.85rem;
   font-weight: 600;
@@ -294,6 +303,15 @@
 }
 .detail-description a:hover {
   text-decoration: underline;
+}
+
+.detail-description img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  margin: 16px 0;
 }
 
 /* Sidebar */

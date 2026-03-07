@@ -6,6 +6,7 @@ import { useI18n } from '../i18n/I18nProvider'
 import LoginModal from './LoginModal'
 
 const NAV_ITEMS = [
+    { path: 'all', labelKey: 'nav.all' },
     { path: 'skill', labelKey: 'nav.skills' },
     { path: 'rules', labelKey: 'nav.rules' },
     { path: 'mcp', labelKey: 'nav.mcp' },
@@ -15,8 +16,9 @@ const NAV_ITEMS = [
 const NAV_TYPE_STORAGE_KEY = 'last_resource_type'
 
 function normalizeResourceType(value?: string | null): string {
-    if (!value) return 'skill'
+    if (!value) return 'all'
     const normalized = value.toLowerCase()
+    if (normalized === 'skills') return 'skill'
     return NAV_ITEMS.some(item => item.path === normalized) ? normalized : 'skill'
 }
 
@@ -88,7 +90,7 @@ function Navbar() {
     return (
         <>
             <nav className="navbar">
-                <Link to="/resource/skill" className="navbar-brand">
+                <Link to="/resource/all" className="navbar-brand">
                     <span className="brand-name">{t('common.skillsHub')}</span>
                 </Link>
 

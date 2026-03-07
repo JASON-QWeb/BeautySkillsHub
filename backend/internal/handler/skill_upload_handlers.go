@@ -52,26 +52,71 @@ func (h *SkillHandler) UploadSkill(c *gin.Context) {
 		return
 	}
 
-	// Skills always use resource_type=skill; other types use their own routes
-	resourceType := "skill"
+	resourceType := resolveReviewedUploadResourceType(c)
+	if uploadMode == "folder" && resourceType == "rules" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Rules 仅支持单文件上传或粘贴 Markdown"})
+		return
+	}
 
-	// Ensure upload dir exists (skills go into skills/ subdirectory)
-	skillsDir := filepath.Join(h.cfg.UploadDir, "skills")
-	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+	uploadSubdir := "skills"
+	if resourceType == "rules" {
+		uploadSubdir = "rules"
+	}
+	uploadTypeDir := filepath.Join(h.cfg.UploadDir, uploadSubdir)
+	if err := os.MkdirAll(uploadTypeDir, 0755); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建上传目录失败"})
 		return
 	}
-	uploadRoot, err := os.MkdirTemp(skillsDir, "skill-upload-*")
+	uploadRoot, err := os.MkdirTemp(uploadTypeDir, "skill-upload-*")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建临时上传目录失败"})
 		return
 	}
+	keepUploadRoot := false
+	defer func() {
+		if keepUploadRoot {
+			return
+		}
+		_ = os.RemoveAll(uploadRoot)
+	}()
 
 	var primaryFileName string
 	var primaryFilePath string
 	var totalFileSize int64
 
-	if uploadMode == "folder" {
+	if uploadMode == "paste" && resourceType == "rules" {
+		rawMarkdown := strings.TrimSpace(c.PostForm("markdown_content"))
+		if rawMarkdown == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请粘贴规则内容"})
+			return
+		}
+
+		requestedName := strings.TrimSpace(c.PostForm("file_name"))
+		if requestedName == "" {
+			requestedName = "RULES.md"
+		}
+		if !isRulesTextExtension(requestedName) {
+			requestedName = "RULES.md"
+		}
+		safeFileName := sanitizeLocalFilename(requestedName)
+		if !isRulesTextExtension(safeFileName) {
+			safeFileName = "RULES.md"
+		}
+
+		filePath := filepath.Join(uploadRoot, safeFileName)
+		contentBytes := []byte(rawMarkdown)
+		if int64(len(contentBytes)) > maxUploadSize {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "上传文件大小不能超过 50MB"})
+			return
+		}
+		if err := os.WriteFile(filePath, contentBytes, 0644); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存规则内容失败"})
+			return
+		}
+		primaryFileName = safeFileName
+		primaryFilePath = filePath
+		totalFileSize = int64(len(contentBytes))
+	} else if uploadMode == "folder" {
 		// Folder upload: multiple files with relative paths
 		form, err := c.MultipartForm()
 		if err != nil {
@@ -159,6 +204,10 @@ func (h *SkillHandler) UploadSkill(c *gin.Context) {
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "上传文件大小不能超过 50MB"})
 			return
 		}
+		if resourceType == "rules" && !isRulesTextExtension(header.Filename) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Rules 仅支持 .md 或 .txt 文件"})
+			return
+		}
 
 		safeFileName := sanitizeLocalFilename(header.Filename)
 		filePath := filepath.Join(uploadRoot, safeFileName)
@@ -238,10 +287,10 @@ func (h *SkillHandler) UploadSkill(c *gin.Context) {
 	}
 
 	if err := h.skillSvc.CreateSkill(skill); err != nil {
-		_ = os.RemoveAll(uploadRoot)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存记录失败"})
 		return
 	}
+	keepUploadRoot = true
 
 	h.dispatchAIReview(skill.ID)
 
@@ -252,6 +301,28 @@ func (h *SkillHandler) UploadSkill(c *gin.Context) {
 		"approved": false,
 		"feedback": "审核排队中，请稍候...",
 	})
+}
+
+func resolveReviewedUploadResourceType(c *gin.Context) string {
+	candidate := strings.ToLower(strings.TrimSpace(c.PostForm("resource_type")))
+	if candidate == "skill" || candidate == "rules" {
+		return candidate
+	}
+
+	routePath := strings.ToLower(strings.TrimSpace(c.FullPath()))
+	if routePath == "" && c.Request != nil && c.Request.URL != nil {
+		routePath = strings.ToLower(strings.TrimSpace(c.Request.URL.Path))
+	}
+	if strings.Contains(routePath, "/rules") {
+		return "rules"
+	}
+
+	return "skill"
+}
+
+func isRulesTextExtension(name string) bool {
+	ext := strings.ToLower(filepath.Ext(strings.TrimSpace(name)))
+	return ext == ".md" || ext == ".txt"
 }
 
 func normalizeTags(raw string) string {
@@ -266,15 +337,14 @@ func normalizeTags(raw string) string {
 	result := make([]string, 0, 5)
 	seen := make(map[string]struct{}, 5)
 	for _, p := range parts {
-		tag := strings.TrimSpace(p)
+		tag := strings.ToLower(strings.TrimSpace(p))
 		if tag == "" {
 			continue
 		}
-		key := strings.ToLower(tag)
-		if _, ok := seen[key]; ok {
+		if _, ok := seen[tag]; ok {
 			continue
 		}
-		seen[key] = struct{}{}
+		seen[tag] = struct{}{}
 		result = append(result, tag)
 		if len(result) >= 5 {
 			break

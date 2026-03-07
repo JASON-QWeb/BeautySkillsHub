@@ -5,12 +5,25 @@ import RightSidebar from '../../components/RightSidebar'
 import SkillCard from '../../components/SkillCard'
 import { useAuth } from '../../contexts/AuthContext'
 import { useI18n } from '../../i18n/I18nProvider'
-import { RESOURCE_TYPES, Skill, fetchCategories, fetchSkillSummary, fetchSkills } from '../../services/api'
+import { RESOURCE_TYPES, Skill, fetchSkillSummary, fetchSkills } from '../../services/api'
+
+type HomeResourceType = 'all' | 'skill' | 'rules' | 'mcp' | 'tools'
+
+function normalizeHomeResourceType(rawType: string | undefined): HomeResourceType {
+    const normalized = (rawType || '').trim().toLowerCase()
+    if (normalized === 'skills') return 'skill'
+    if (normalized === 'all' || normalized === 'skill' || normalized === 'rules' || normalized === 'mcp' || normalized === 'tools') {
+        return normalized
+    }
+    return 'all'
+}
 
 function HomePage() {
     const { type } = useParams<{ type: string }>()
-    const resourceType = type || 'skill'
-    const info = RESOURCE_TYPES[resourceType] || RESOURCE_TYPES.skill
+    const normalizedType = normalizeHomeResourceType(type)
+    const isOverview = normalizedType === 'all'
+    const resourceTypeFilter = isOverview ? '' : normalizedType
+    const info = RESOURCE_TYPES[normalizedType] || RESOURCE_TYPES.all
 
     const navigate = useNavigate()
     const { user } = useAuth()
@@ -20,44 +33,79 @@ function HomePage() {
     const [loading, setLoading] = useState(true)
     const [summary, setSummary] = useState({ total: 0, yesterday_new: 0 })
     const [search, setSearch] = useState('')
-    const [category, setCategory] = useState('')
-    const [categories, setCategories] = useState<string[]>([])
     const [page, setPage] = useState(1)
     const [total, setTotal] = useState(0)
+    const [overviewComposition, setOverviewComposition] = useState({
+        skill: 0,
+        rules: 0,
+        mcp: 0,
+        tools: 0,
+    })
     const [loginOpen, setLoginOpen] = useState(false)
     const [animKey, setAnimKey] = useState(0)
 
     const pageSize = 20
 
     useEffect(() => {
-        fetchCategories(resourceType).then(setCategories).catch(() => setCategories([]))
         setSearch('')
-        setCategory('')
         setPage(1)
         setAnimKey(prev => prev + 1)
-    }, [resourceType])
+    }, [normalizedType])
 
     useEffect(() => {
         const loadSummary = async () => {
             try {
-                const data = await fetchSkillSummary(resourceType)
+                if (isOverview) {
+                    const [allSummary, skillSummary, rulesSummary, mcpSummary, toolsSummary] = await Promise.all([
+                        fetchSkillSummary(''),
+                        fetchSkillSummary('skill'),
+                        fetchSkillSummary('rules'),
+                        fetchSkillSummary('mcp'),
+                        fetchSkillSummary('tools'),
+                    ])
+                    setSummary({
+                        total: allSummary.total || 0,
+                        yesterday_new: allSummary.yesterday_new || 0,
+                    })
+                    setOverviewComposition({
+                        skill: skillSummary.total || 0,
+                        rules: rulesSummary.total || 0,
+                        mcp: mcpSummary.total || 0,
+                        tools: toolsSummary.total || 0,
+                    })
+                    return
+                }
+
+                const data = await fetchSkillSummary(resourceTypeFilter)
                 setSummary({
                     total: data.total || 0,
                     yesterday_new: data.yesterday_new || 0,
                 })
+                setOverviewComposition({
+                    skill: 0,
+                    rules: 0,
+                    mcp: 0,
+                    tools: 0,
+                })
             } catch (err) {
                 console.error('Failed to load summary:', err)
                 setSummary({ total: 0, yesterday_new: 0 })
+                setOverviewComposition({
+                    skill: 0,
+                    rules: 0,
+                    mcp: 0,
+                    tools: 0,
+                })
             }
         }
 
         loadSummary()
-    }, [resourceType])
+    }, [isOverview, resourceTypeFilter])
 
     const loadSkills = useCallback(async () => {
         setLoading(true)
         try {
-            const data = await fetchSkills(search, page, pageSize, category, resourceType)
+            const data = await fetchSkills(search, page, pageSize, '', resourceTypeFilter)
             setSkills(data.skills || [])
             setTotal(data.total || 0)
         } catch (err) {
@@ -67,7 +115,7 @@ function HomePage() {
         } finally {
             setLoading(false)
         }
-    }, [search, page, category, resourceType])
+    }, [search, page, resourceTypeFilter])
 
     useEffect(() => {
         loadSkills()
@@ -83,7 +131,7 @@ function HomePage() {
 
     const handleUpload = () => {
         if (user) {
-            navigate(`/upload?type=${resourceType}`)
+            navigate(`/resource/${normalizedType}/upload`)
             return
         }
         setLoginOpen(true)
@@ -114,17 +162,40 @@ function HomePage() {
                         </div>
                     </div>
 
-                    <div className="home-stats">
-                        <div className="home-stat-item">
-                            <p className="home-stat-value">{total.toLocaleString()}</p>
-                            <p className="home-stat-label">{t('home.totalItems')}</p>
+                    {isOverview ? (
+                        <div className="home-stats home-stats-overview">
+                            <div className="home-stat-item">
+                                <p className="home-stat-value">{overviewComposition.skill.toLocaleString()}</p>
+                                <p className="home-stat-label">{t('nav.skills')}</p>
+                            </div>
+                            <div className="home-stat-item">
+                                <p className="home-stat-value">{overviewComposition.rules.toLocaleString()}</p>
+                                <p className="home-stat-label">{t('nav.rules')}</p>
+                            </div>
+                            <div className="home-stat-item">
+                                <p className="home-stat-value">{overviewComposition.mcp.toLocaleString()}</p>
+                                <p className="home-stat-label">{t('nav.mcp')}</p>
+                            </div>
+                            <div className="home-stat-item">
+                                <p className="home-stat-value">{overviewComposition.tools.toLocaleString()}</p>
+                                <p className="home-stat-label">{t('nav.tools')}</p>
+                            </div>
                         </div>
-                        <div className="home-stat-item">
-                            <p className="home-stat-value">{totalDownloads >= 1000 ? `${(totalDownloads / 1000).toFixed(1)}K` : totalDownloads}</p>
-                            <p className="home-stat-label">{t('home.downloads')}</p>
+                    ) : (
+                        <div className="home-stats">
+                            <div className="home-stat-item">
+                                <p className="home-stat-value">{total.toLocaleString()}</p>
+                                <p className="home-stat-label">{t('home.totalItems')}</p>
+                            </div>
+                            <div className="home-stat-item">
+                                <p className="home-stat-value">{totalDownloads >= 1000 ? `${(totalDownloads / 1000).toFixed(1)}K` : totalDownloads}</p>
+                                <p className="home-stat-label">{t('home.downloads')}</p>
+                            </div>
+                            <button className="home-upload-cta" onClick={handleUpload}>
+                                {t('home.uploadAsset', { label: info.label })}
+                            </button>
                         </div>
-                        <button className="home-upload-cta" onClick={handleUpload}>{t('home.uploadAsset')}</button>
-                    </div>
+                    )}
                 </header>
 
                 <div className="home-toolbar glass-card">
@@ -146,32 +217,6 @@ function HomePage() {
                         ⌁ {t('home.filters')}
                     </button>
                 </div>
-
-                {categories.length > 0 && (
-                    <div className="filter-chips">
-                        <button
-                            className={`filter-chip ${category === '' ? 'active' : ''}`}
-                            onClick={() => {
-                                setCategory('')
-                                setPage(1)
-                            }}
-                        >
-                            {t('home.allTypes')}
-                        </button>
-                        {categories.map(cat => (
-                            <button
-                                key={cat}
-                                className={`filter-chip ${category === cat ? 'active' : ''}`}
-                                onClick={() => {
-                                    setCategory(cat)
-                                    setPage(1)
-                                }}
-                            >
-                                {cat}
-                            </button>
-                        ))}
-                    </div>
-                )}
 
                 {loading ? (
                     <div className="empty-state">
@@ -220,7 +265,7 @@ function HomePage() {
                 )}
             </section>
 
-            <RightSidebar resourceType={resourceType} />
+            <RightSidebar resourceType={resourceTypeFilter} />
             <LoginModal isOpen={loginOpen} onClose={() => setLoginOpen(false)} />
         </div>
     )

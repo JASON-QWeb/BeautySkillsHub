@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -18,12 +19,46 @@ import (
 )
 
 // ResourceHandler handles CRUD and engagement for non-skill resource types
-// (mcp, tools, rules). These resources skip AI review and GitHub sync,
-// and are published immediately on upload.
+// (mcp, tools, rules).
 type ResourceHandler struct {
 	skillSvc     *service.SkillService
 	cfg          *config.Config
 	resourceType string // "mcp", "tools", or "rules"
+}
+
+var toolsArchiveSuffixes = []string{
+	".zip", ".tar", ".tar.gz", ".tgz", ".rar", ".7z", ".xz", ".bz2", ".gz",
+}
+
+func isToolsArchiveFilename(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	if lower == "" {
+		return false
+	}
+	for _, suffix := range toolsArchiveSuffixes {
+		if strings.HasSuffix(lower, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func validateSourceURL(raw string) error {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return err
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return fmt.Errorf("unsupported source url scheme")
+	}
+	if strings.TrimSpace(parsed.Host) == "" {
+		return fmt.Errorf("missing source url host")
+	}
+	return nil
 }
 
 func NewResourceHandler(skillSvc *service.SkillService, resourceType string, cfg *config.Config) *ResourceHandler {
@@ -116,32 +151,19 @@ func (h *ResourceHandler) GetReadme(c *gin.Context) {
 	var readmePath string
 	sessionRoot := uploadSessionRoot(h.cfg.UploadDir, skill.FilePath)
 	if sessionRoot != "" {
-		if info, err := os.Stat(sessionRoot); err == nil && info.IsDir() {
-			candidates := []string{
-				"SKILL.md", "SKILLS.md", "README.md",
-				"skill.md", "skills.md", "readme.md",
-				"SKILL.MD", "SKILLS.MD", "README.MD",
-			}
-			for _, candidate := range candidates {
-				p := filepath.Join(sessionRoot, candidate)
-				if _, err := os.Stat(p); err == nil {
-					readmePath = p
-					break
-				}
-			}
-		}
+		readmePath = findReadmePathInSession(sessionRoot)
 	}
 	if readmePath == "" && strings.HasSuffix(strings.ToLower(skill.FileName), ".md") {
 		readmePath = skill.FilePath
 	}
 	if readmePath == "" {
-		c.String(http.StatusOK, "")
+		c.String(http.StatusOK, skill.Description)
 		return
 	}
 
 	content, err := os.ReadFile(readmePath)
 	if err != nil {
-		c.String(http.StatusOK, "")
+		c.String(http.StatusOK, skill.Description)
 		return
 	}
 	c.String(http.StatusOK, string(content))
@@ -157,6 +179,14 @@ func (h *ResourceHandler) Download(c *gin.Context) {
 	skill, err := h.skillSvc.GetSkill(uint(id))
 	if err != nil || skill.ResourceType != h.resourceType {
 		c.JSON(http.StatusNotFound, gin.H{"error": "resource not found"})
+		return
+	}
+	if strings.TrimSpace(skill.FilePath) == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "download file not found"})
+		return
+	}
+	if _, statErr := os.Stat(skill.FilePath); statErr != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "download file not found"})
 		return
 	}
 
@@ -246,101 +276,70 @@ func (h *ResourceHandler) Upload(c *gin.Context) {
 	description := c.PostForm("description")
 	tags := normalizeTags(c.PostForm("tags"))
 	author := normalizeSkillAuthor(username, c.PostForm("author"))
-	uploadMode := c.DefaultPostForm("upload_mode", "file")
+	uploadMode := strings.ToLower(strings.TrimSpace(c.DefaultPostForm("upload_mode", "file")))
+	sourceURL := strings.TrimSpace(c.PostForm("source_url"))
 
 	if name == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
 		return
 	}
-
-	// Upload to type-specific subdirectory
-	typeDir := filepath.Join(h.cfg.UploadDir, h.resourceType)
-	if err := os.MkdirAll(typeDir, 0755); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "create upload dir failed"})
+	if err := validateSourceURL(sourceURL); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid source_url"})
 		return
 	}
-	uploadRoot, err := os.MkdirTemp(typeDir, "upload-*")
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "create temp dir failed"})
+	if uploadMode == "" {
+		uploadMode = "file"
+	}
+	switch h.resourceType {
+	case "mcp":
+		if uploadMode != "metadata" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "mcp only supports metadata upload mode"})
+			return
+		}
+	case "tools":
+		if uploadMode != "metadata" && uploadMode != "file" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "tools upload_mode must be metadata or file"})
+			return
+		}
+	default:
+		if uploadMode == "metadata" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "metadata upload mode is not supported"})
+			return
+		}
+	}
+	if uploadMode == "folder" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "folder upload is not supported for this resource type"})
 		return
+	}
+
+	var uploadRoot string
+	keepUploadRoot := false
+	defer func() {
+		if keepUploadRoot || uploadRoot == "" {
+			return
+		}
+		_ = os.RemoveAll(uploadRoot)
+	}()
+
+	if uploadMode == "file" {
+		typeDir := filepath.Join(h.cfg.UploadDir, h.resourceType)
+		if err := os.MkdirAll(typeDir, 0755); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "create upload dir failed"})
+			return
+		}
+		var err error
+		uploadRoot, err = os.MkdirTemp(typeDir, "upload-*")
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "create temp dir failed"})
+			return
+		}
 	}
 
 	var primaryFileName string
 	var primaryFilePath string
 	var totalFileSize int64
 
-	if uploadMode == "folder" {
-		form, err := c.MultipartForm()
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "parse form failed"})
-			return
-		}
-		files := form.File["files"]
-		filePaths := form.Value["file_paths"]
-
-		if len(files) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "no files selected"})
-			return
-		}
-
-		for i, fh := range files {
-			if totalFileSize+fh.Size > maxUploadSize {
-				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "total size exceeds 50MB"})
-				return
-			}
-			relPath := fh.Filename
-			if i < len(filePaths) && filePaths[i] != "" {
-				relPath = filePaths[i]
-			}
-			normalizedRel, err := service.NormalizeRepoRelativePath(relPath)
-			if err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid path %q", relPath)})
-				return
-			}
-
-			localPath := filepath.Join(uploadRoot, filepath.FromSlash(normalizedRel))
-			if !isPathInsideBase(uploadRoot, localPath) {
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid path %q", relPath)})
-				return
-			}
-
-			localRelDir := filepath.Dir(localPath)
-			if localRelDir != "." {
-				if err := os.MkdirAll(localRelDir, 0755); err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": "create subdir failed"})
-					return
-				}
-			}
-
-			f, err := fh.Open()
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("read file failed: %s", relPath)})
-				return
-			}
-
-			dst, err := os.Create(localPath)
-			if err != nil {
-				f.Close()
-				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("save file failed: %s", relPath)})
-				return
-			}
-
-			if _, err := io.Copy(dst, f); err != nil {
-				f.Close()
-				dst.Close()
-				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("save file failed: %s", relPath)})
-				return
-			}
-
-			f.Close()
-			dst.Close()
-			totalFileSize += fh.Size
-			if i == 0 {
-				primaryFileName = filepath.Base(normalizedRel)
-				primaryFilePath = localPath
-			}
-		}
-	} else {
+	if uploadMode == "file" {
 		file, header, err := c.Request.FormFile("file")
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "file required"})
@@ -350,6 +349,10 @@ func (h *ResourceHandler) Upload(c *gin.Context) {
 
 		if header.Size > maxUploadSize {
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "file size exceeds 50MB"})
+			return
+		}
+		if h.resourceType == "tools" && !isToolsArchiveFilename(header.Filename) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "tools attachment must be an archive file"})
 			return
 		}
 
@@ -421,14 +424,15 @@ func (h *ResourceHandler) Upload(c *gin.Context) {
 		AIDescription:       "",
 		HumanReviewStatus:   model.HumanReviewStatusApproved,
 		Published:           true,
+		GitHubURL:           sourceURL,
 		GitHubSyncStatus:    "disabled",
 	}
 
 	if err := h.skillSvc.CreateSkill(resource); err != nil {
-		_ = os.RemoveAll(uploadRoot)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "save record failed"})
 		return
 	}
+	keepUploadRoot = true
 
 	resource.ThumbnailURL = normalizeThumbnailURL(resource.ThumbnailURL)
 
@@ -468,6 +472,11 @@ func (h *ResourceHandler) Update(c *gin.Context) {
 		return
 	}
 
+	if c.ContentType() == "multipart/form-data" {
+		h.updateFromMultipart(c, skill)
+		return
+	}
+
 	var req updateSkillRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -496,6 +505,220 @@ func (h *ResourceHandler) Update(c *gin.Context) {
 
 	skill.ThumbnailURL = normalizeThumbnailURL(skill.ThumbnailURL)
 	c.JSON(http.StatusOK, gin.H{"skill": skill})
+}
+
+func (h *ResourceHandler) updateFromMultipart(c *gin.Context, skill *model.Skill) {
+	nameRaw, hasName := c.GetPostForm("name")
+	descriptionRaw, hasDescription := c.GetPostForm("description")
+	tagsRaw, hasTags := c.GetPostForm("tags")
+	sourceRaw, hasSourceURL := c.GetPostForm("source_url")
+	uploadMode := strings.ToLower(strings.TrimSpace(c.DefaultPostForm("upload_mode", "")))
+	if uploadMode == "" {
+		uploadMode = "metadata"
+	}
+	if h.resourceType == "mcp" && uploadMode != "metadata" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "mcp only supports metadata upload mode"})
+		return
+	}
+	if h.resourceType == "tools" && uploadMode != "metadata" && uploadMode != "file" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "tools upload_mode must be metadata or file"})
+		return
+	}
+
+	changed := false
+	oldFilePath := skill.FilePath
+	oldThumbnail := skill.ThumbnailURL
+
+	if hasName {
+		name := strings.TrimSpace(nameRaw)
+		if name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "name cannot be empty"})
+			return
+		}
+		if skill.Name != name {
+			changed = true
+		}
+		skill.Name = name
+	}
+	if hasDescription {
+		description := strings.TrimSpace(descriptionRaw)
+		if skill.Description != description {
+			changed = true
+		}
+		skill.Description = description
+	}
+	if hasTags {
+		tags := normalizeTags(tagsRaw)
+		if skill.Tags != tags {
+			changed = true
+		}
+		skill.Tags = tags
+	}
+	if hasSourceURL {
+		sourceURL := strings.TrimSpace(sourceRaw)
+		if err := validateSourceURL(sourceURL); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid source_url"})
+			return
+		}
+		if skill.GitHubURL != sourceURL {
+			changed = true
+		}
+		skill.GitHubURL = sourceURL
+	}
+
+	var newUploadRoot string
+	keepNewUploadRoot := false
+	defer func() {
+		if keepNewUploadRoot || newUploadRoot == "" {
+			return
+		}
+		_ = os.RemoveAll(newUploadRoot)
+	}()
+
+	uploadedFile := false
+	file, header, fileErr := c.Request.FormFile("file")
+	if fileErr == nil && file != nil {
+		defer file.Close()
+		uploadedFile = true
+		if header.Size > maxUploadSize {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "file size exceeds 50MB"})
+			return
+		}
+		if h.resourceType == "tools" && !isToolsArchiveFilename(header.Filename) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "tools attachment must be an archive file"})
+			return
+		}
+
+		typeDir := filepath.Join(h.cfg.UploadDir, h.resourceType)
+		if err := os.MkdirAll(typeDir, 0755); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "create upload dir failed"})
+			return
+		}
+		tempRoot, err := os.MkdirTemp(typeDir, "upload-*")
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "create temp dir failed"})
+			return
+		}
+		newUploadRoot = tempRoot
+
+		safeFileName := sanitizeLocalFilename(header.Filename)
+		nextFilePath := filepath.Join(newUploadRoot, safeFileName)
+		dst, err := os.Create(nextFilePath)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "save file failed"})
+			return
+		}
+		defer dst.Close()
+
+		if _, err := io.Copy(dst, file); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "save file failed"})
+			return
+		}
+
+		fileName := filepath.Base(strings.ReplaceAll(header.Filename, "\\", "/"))
+		if fileName == "" || fileName == "." || fileName == "/" {
+			fileName = safeFileName
+		}
+
+		skill.FileName = fileName
+		skill.FilePath = nextFilePath
+		skill.FileSize = header.Size
+		changed = true
+	} else if fileErr != nil && !errors.Is(fileErr, http.ErrMissingFile) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file"})
+		return
+	}
+
+	if h.resourceType == "tools" && uploadMode == "file" && !uploadedFile {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file required for upload_mode=file"})
+		return
+	}
+
+	var newThumbnailFile string
+	keepNewThumbnail := false
+	defer func() {
+		if keepNewThumbnail || newThumbnailFile == "" {
+			return
+		}
+		if thumbPath, ok := resolveThumbnailPath(h.cfg.ThumbnailDir, newThumbnailFile); ok {
+			_ = os.Remove(thumbPath)
+		}
+	}()
+
+	thumbnailFile, thumbnailHeader, thumbnailErr := c.Request.FormFile("thumbnail")
+	if thumbnailErr == nil && thumbnailFile != nil {
+		defer thumbnailFile.Close()
+		thumbFileName, err := saveUploadedThumbnail(skill.Name, thumbnailFile, thumbnailHeader, h.cfg.ThumbnailDir)
+		if err != nil {
+			switch {
+			case errors.Is(err, errThumbnailTooLarge):
+				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "thumbnail size exceeds 5MB"})
+			case errors.Is(err, errThumbnailExtensionLimit):
+				c.JSON(http.StatusBadRequest, gin.H{"error": "thumbnail must be png/jpg/jpeg/webp/gif"})
+			default:
+				c.JSON(http.StatusBadRequest, gin.H{"error": "save thumbnail failed"})
+			}
+			return
+		}
+		newThumbnailFile = thumbFileName
+		skill.ThumbnailURL = thumbFileName
+		changed = true
+	} else if thumbnailErr != nil && !errors.Is(thumbnailErr, http.ErrMissingFile) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid thumbnail"})
+		return
+	}
+
+	if !changed {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "at least one field required"})
+		return
+	}
+
+	if err := h.skillSvc.UpdateSkill(skill); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "update failed"})
+		return
+	}
+
+	keepNewUploadRoot = true
+	keepNewThumbnail = true
+
+	if uploadedFile && oldFilePath != "" && oldFilePath != skill.FilePath {
+		removeResourceUploadAsset(h.cfg.UploadDir, oldFilePath)
+	}
+	if newThumbnailFile != "" && oldThumbnail != "" && oldThumbnail != newThumbnailFile {
+		removeStoredThumbnail(h.cfg.ThumbnailDir, oldThumbnail)
+	}
+
+	skill.ThumbnailURL = normalizeThumbnailURL(skill.ThumbnailURL)
+	c.JSON(http.StatusOK, gin.H{"skill": skill})
+}
+
+func removeResourceUploadAsset(uploadDir, filePath string) {
+	if strings.TrimSpace(filePath) == "" {
+		return
+	}
+	if sessionRoot := uploadSessionRoot(uploadDir, filePath); sessionRoot != "" &&
+		isPathInsideBase(uploadDir, sessionRoot) &&
+		filepath.Clean(sessionRoot) != filepath.Clean(uploadDir) {
+		_ = os.RemoveAll(sessionRoot)
+		return
+	}
+
+	_ = os.Remove(filePath)
+	dir := filepath.Dir(filePath)
+	if isPathInsideBase(uploadDir, dir) && filepath.Clean(dir) != filepath.Clean(uploadDir) {
+		_ = os.RemoveAll(dir)
+	}
+}
+
+func removeStoredThumbnail(thumbnailDir, storedThumbnail string) {
+	cleaned := strings.TrimSpace(storedThumbnail)
+	if cleaned == "" || strings.HasPrefix(cleaned, "http://") || strings.HasPrefix(cleaned, "https://") {
+		return
+	}
+	cleaned = strings.TrimPrefix(cleaned, "/api/thumbnails/")
+	if thumbPath, ok := resolveThumbnailPath(thumbnailDir, cleaned); ok {
+		_ = os.Remove(thumbPath)
+	}
 }
 
 // --------------- Delete (no GitHub sync) ---------------

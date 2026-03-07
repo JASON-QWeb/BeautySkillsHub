@@ -3,8 +3,8 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -45,6 +45,16 @@ func (h *SkillHandler) ListSkills(c *gin.Context) {
 		"total":     total,
 		"page":      page,
 		"page_size": pageSize,
+	})
+}
+
+// GetSkillInstallConfig handles GET /api/skills/install-config.
+func (h *SkillHandler) GetSkillInstallConfig(c *gin.Context) {
+	repoURL := resolveInstallRepoURL(h.cfg.GitHubOwner, h.cfg.GitHubRepo)
+	baseDir := sanitizeInstallBaseDir(h.cfg.GitHubBaseDir)
+	c.JSON(http.StatusOK, gin.H{
+		"github_repo":     repoURL,
+		"github_base_dir": baseDir,
 	})
 }
 
@@ -127,20 +137,7 @@ func (h *SkillHandler) GetSkillReadme(c *gin.Context) {
 	sessionRoot := uploadSessionRoot(h.cfg.UploadDir, skill.FilePath)
 
 	if sessionRoot != "" {
-		if info, err := os.Stat(sessionRoot); err == nil && info.IsDir() {
-			candidates := []string{
-				"SKILL.md", "SKILLS.md", "README.md",
-				"skill.md", "skills.md", "readme.md",
-				"SKILL.MD", "SKILLS.MD", "README.MD",
-			}
-			for _, candidate := range candidates {
-				candidatePath := filepath.Join(sessionRoot, candidate)
-				if _, err := os.Stat(candidatePath); err == nil {
-					readmePath = candidatePath
-					break
-				}
-			}
-		}
+		readmePath = findReadmePathInSession(sessionRoot)
 	}
 
 	if readmePath == "" {
@@ -203,4 +200,58 @@ func (h *SkillHandler) ServeThumbnail(c *gin.Context) {
 	}
 
 	c.File(filePath)
+}
+
+func resolveInstallRepoURL(owner, repo string) string {
+	const fallbackRepo = "https://github.com/skillshub/community"
+
+	rawRepo := strings.TrimSpace(repo)
+	rawOwner := strings.TrimSpace(owner)
+	if rawRepo == "" {
+		if rawOwner == "" {
+			return fallbackRepo
+		}
+		return fallbackRepo
+	}
+
+	if strings.HasPrefix(rawRepo, "http://") || strings.HasPrefix(rawRepo, "https://") {
+		u, err := url.Parse(rawRepo)
+		if err != nil {
+			return fallbackRepo
+		}
+		parts := strings.Split(strings.Trim(strings.TrimSuffix(u.Path, ".git"), "/"), "/")
+		if len(parts) >= 2 {
+			return fmt.Sprintf("https://github.com/%s/%s", parts[0], parts[1])
+		}
+		return fallbackRepo
+	}
+
+	normalizedRepo := strings.Trim(strings.TrimPrefix(rawRepo, "github.com/"), "/")
+	parts := strings.Split(normalizedRepo, "/")
+	if len(parts) >= 2 {
+		return fmt.Sprintf("https://github.com/%s/%s", parts[0], parts[1])
+	}
+
+	if rawOwner == "" {
+		return fallbackRepo
+	}
+	return fmt.Sprintf("https://github.com/%s/%s", rawOwner, parts[0])
+}
+
+func sanitizeInstallBaseDir(baseDir string) string {
+	raw := strings.ToLower(strings.TrimSpace(baseDir))
+	if raw == "" {
+		return "skills"
+	}
+	var b strings.Builder
+	for _, r := range raw {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	value := strings.Trim(b.String(), "-_")
+	if value == "" {
+		return "skills"
+	}
+	return value
 }

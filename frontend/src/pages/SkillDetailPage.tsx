@@ -1,1 +1,1 @@
-export { default } from '../features/skill-detail/SkillDetailPage'
+export { default } from './ResourceDetailPage'

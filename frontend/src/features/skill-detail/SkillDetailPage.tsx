@@ -2,130 +2,16 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useI18n } from '../../i18n/I18nProvider'
-import { DeleteProgressStage, Skill, deleteSkill, deleteSkillWithProgress, favoriteSkill, fetchSkill, fetchSkillReadme, getDownloadUrl, likeSkill, submitHumanReview, trackDownloadHit, unfavoriteSkill, unlikeSkill, updateSkill } from '../../services/api'
+import { DeleteProgressStage, Skill, deleteSkill, deleteSkillWithProgress, favoriteSkill, fetchSkill, fetchSkillInstallConfig, fetchSkillReadme, getDownloadUrl, likeSkill, submitHumanReview, trackDownloadHit, unfavoriteSkill, unlikeSkill } from '../../services/api'
 import { useDialog } from '../../contexts/DialogContext'
 import LoadingBars from '../../components/LoadingBars'
 import { formatDate, formatSize } from './formatters'
+import { parseMarkdown } from '../detail/shared/markdown'
+import { parseReadmeFrontMatter } from '../detail/shared/frontmatter'
 
 function formatDownloads(downloads: number) {
     if (downloads >= 1000) return `${(downloads / 1000).toFixed(1)}K`
     return `${downloads}`
-}
-
-function escapeHtml(str: string): string {
-    return str
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;')
-}
-
-function parseMarkdown(text: string) {
-    if (!text) return ''
-
-    // Temporarily replace code blocks to protect their contents
-    const codeBlocks: string[] = []
-    let raw = text.replace(/```([\s\S]*?)```/g, (_match, code) => {
-        codeBlocks.push(code)
-        return `__CODE_BLOCK_${codeBlocks.length - 1}__`
-    })
-
-    // Extract inline code before escaping
-    const inlineCodes: string[] = []
-    raw = raw.replace(/`([^`]+)`/g, (_match, code) => {
-        inlineCodes.push(code)
-        return `__INLINE_CODE_${inlineCodes.length - 1}__`
-    })
-
-    // Extract markdown links before escaping
-    const links: { text: string; url: string }[] = []
-    raw = raw.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, linkText, url) => {
-        links.push({ text: linkText, url })
-        return `__LINK_${links.length - 1}__`
-    })
-
-    // Escape all HTML in the remaining text to prevent XSS
-    let html = escapeHtml(raw)
-
-    // Restore inline code (escaped)
-    html = html.replace(/__INLINE_CODE_(\d+)__/g, (_match, index) => {
-        return `<code>${escapeHtml(inlineCodes[Number(index)])}</code>`
-    })
-
-    // Restore links (sanitize href to only allow http/https)
-    html = html.replace(/__LINK_(\d+)__/g, (_match, index) => {
-        const link = links[Number(index)]
-        const safeUrl = /^https?:\/\//i.test(link.url) ? escapeHtml(link.url) : '#'
-        return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${escapeHtml(link.text)}</a>`
-    })
-
-    // Bold
-    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-
-    // Headers
-    html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>')
-    html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>')
-    html = html.replace(/^# (.+)$/gm, '<h2>$1</h2>')
-
-    // Lists
-    html = html.replace(/^- (.+)$/gm, '<li>$1</li>')
-    html = html.replace(/^\* (.+)$/gm, '<li>$1</li>')
-    html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>')
-
-    // Paragraphs
-    html = html.replace(/\n{2,}/g, '</p><p>')
-    html = '<p>' + html + '</p>'
-    html = html.replace(/<p>\s*<(h[23]|ul)/g, '<$1')
-    html = html.replace(/<\/(h[23]|ul)>\s*<\/p>/g, '</$1>')
-    html = html.replace(/<p>\s*<\/p>/g, '')
-
-    // Restore code blocks (escaped)
-    html = html.replace(/__CODE_BLOCK_(\d+)__/g, (_match, index) => {
-        return `<pre><code>${escapeHtml(codeBlocks[Number(index)])}</code></pre>`
-    })
-
-    return html
-}
-
-interface ReadmeFrontMatter {
-    name?: string
-    description?: string
-    [key: string]: string | undefined
-}
-
-interface ParsedReadme {
-    body: string
-    frontMatter: ReadmeFrontMatter
-}
-
-function parseReadmeFrontMatter(raw: string): ParsedReadme {
-    const source = raw || ''
-    const match = source.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n)?/)
-    if (!match) {
-        return {
-            body: source,
-            frontMatter: {},
-        }
-    }
-
-    const metadata: ReadmeFrontMatter = {}
-    const lines = match[1].split(/\r?\n/)
-    for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed || trimmed.startsWith('#')) continue
-        const idx = trimmed.indexOf(':')
-        if (idx <= 0) continue
-        const key = trimmed.slice(0, idx).trim().toLowerCase()
-        const value = trimmed.slice(idx + 1).trim()
-        if (!key || !value) continue
-        metadata[key] = value
-    }
-
-    return {
-        body: source.slice(match[0].length),
-        frontMatter: metadata,
-    }
 }
 
 function normalizeSummaryLine(line: string) {
@@ -134,30 +20,67 @@ function normalizeSummaryLine(line: string) {
         .trim()
 }
 
-function extractAIFunctionSummary(skill: Skill | null): string {
-    if (!skill) return ''
+function isSecuritySentence(line: string) {
+    return /^(安全性|安全|security|safety|risk|风险)\s*[:：-]?/i.test(line)
+        || /(未发现风险|高风险|恶意|漏洞|security|risk)/i.test(line)
+}
 
-    const lines = (skill.ai_description || '')
+function normalizeInstallSkillName(name: string) {
+    const normalized = name
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, '_')
+        .replace(/[^a-z0-9_-]+/g, '')
+    return normalized || 'untitled_skill'
+}
+
+function normalizeInstallFlag(baseDir: string) {
+    const normalized = baseDir
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '')
+    return normalized || 'skills'
+}
+
+function buildFunctionalSummaryLines(skill: Skill | null, fallbackDescription: string): string[] {
+    if (!skill) return []
+
+    const candidateLines: string[] = []
+    const addLine = (line: string) => {
+        const trimmed = line.trim()
+        if (!trimmed || isSecuritySentence(trimmed)) return
+        candidateLines.push(trimmed.replace(/\s+/g, ' '))
+    }
+
+    ;(skill.ai_description || '')
         .split('\n')
-        .map(line => line.trim())
-        .filter(Boolean)
+        .map(line => normalizeSummaryLine(line))
+        .forEach(addLine)
 
-    const explicitFunctionLine = lines.find(line => /^(功能性|功能|functional|function)\s*[:：-]?/i.test(line))
-    if (explicitFunctionLine) {
-        return normalizeSummaryLine(explicitFunctionLine)
-    }
-
-    const nonSafetyLine = lines.find(line => !/^(安全性|安全|security)\s*[:：-]?/i.test(line))
-    if (nonSafetyLine) {
-        return normalizeSummaryLine(nonSafetyLine)
-    }
-
-    const feedbackFallback = (skill.ai_feedback || '')
+    ;(skill.ai_feedback || '')
         .split(/[\n。！？]/)
         .map(line => line.trim())
-        .find(Boolean)
+        .forEach(addLine)
 
-    return feedbackFallback || ''
+    if (fallbackDescription.trim()) {
+        fallbackDescription
+            .split(/[\n。！？]/)
+            .map(line => line.trim())
+            .forEach(addLine)
+    }
+
+    const unique = Array.from(new Set(candidateLines))
+    if (unique.length >= 2) return unique.slice(0, 2)
+    if (unique.length === 1) {
+        return [
+            unique[0],
+            `适用于 ${skill.name} 相关场景，可按项目需求扩展能力与流程。`,
+        ]
+    }
+    return [
+        `该资源围绕 ${skill.name} 提供可复用的功能能力与实现路径。`,
+        '适合结合 README 的安装与配置步骤，在项目中快速落地使用。',
+    ]
 }
 
 function extractSafetyChecks(skill: Skill | null): string[] {
@@ -221,23 +144,25 @@ function stageRank(stage: DeleteFlowStage) {
     return idx >= 0 ? idx : 0
 }
 
-function SkillDetailPage() {
-    const { id } = useParams<{ id: string }>()
+interface SkillDetailPageProps {
+    resourceTypeOverride?: 'skill' | 'rules' | 'mcp' | 'tools'
+}
+
+function SkillDetailPage({ resourceTypeOverride }: SkillDetailPageProps) {
+    const { id, type } = useParams<{ id: string; type?: string }>()
     const location = useLocation()
     const navigate = useNavigate()
     const { t } = useI18n()
     const { user } = useAuth()
     const { showAlert, showConfirm } = useDialog()
-    const initialResourceType = (location.state as { resourceType?: string } | null)?.resourceType || ''
+    const initialResourceType = resourceTypeOverride
+        || (location.state as { resourceType?: string } | null)?.resourceType
+        || (type || '')
 
     const [skill, setSkill] = useState<Skill | null>(null)
     const [readmeContent, setReadmeContent] = useState<string>('')
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState('')
-    const [editing, setEditing] = useState(false)
-    const [savingEdit, setSavingEdit] = useState(false)
-    const [editName, setEditName] = useState('')
-    const [editDescription, setEditDescription] = useState('')
     const [deleting, setDeleting] = useState(false)
     const [deleteModalOpen, setDeleteModalOpen] = useState(false)
     const [deleteStage, setDeleteStage] = useState<DeleteFlowStage>('db')
@@ -249,6 +174,10 @@ function SkillDetailPage() {
     const [userLiked, setUserLiked] = useState(false)
     const [favoriting, setFavoriting] = useState(false)
     const [favorited, setFavorited] = useState(false)
+    const [installConfig, setInstallConfig] = useState({
+        github_repo: 'https://github.com/skillshub/community',
+        github_base_dir: 'skills',
+    })
 
     useEffect(() => {
         if (!id) return
@@ -277,7 +206,6 @@ function SkillDetailPage() {
                 
                 setSkill(data)
                 setReadmeContent(readme)
-                setEditing(false)
                 setError('')
             } catch (err) {
                 setError(err instanceof Error ? err.message : t('detail.loadFailed'))
@@ -294,12 +222,6 @@ function SkillDetailPage() {
         setLikesCount(skill.likes_count || 0)
         setUserLiked(!!skill.user_liked)
         setFavorited(!!skill.favorited)
-    }, [skill])
-
-    const installCommand = useMemo(() => {
-        if (!skill) return ''
-        const slug = skill.name.toLowerCase().replace(/\s+/g, '-')
-        return `npx skills add https://github.com/skillshub/community --skill ${slug}`
     }, [skill])
 
     const canManage = useMemo(() => {
@@ -328,15 +250,52 @@ function SkillDetailPage() {
     }, [user, skill, canManage, humanReviewStatus])
 
     const canLike = useMemo(() => {
-        if (!user || !skill) return false
-        if (!skill.ai_approved) return false
-        if (skill.user_id && skill.user_id > 0) return skill.user_id !== user.id
-        return (skill.author || '').trim().toLowerCase() !== user.username.trim().toLowerCase()
+        return !!user && !!skill && skill.ai_approved
     }, [user, skill])
 
     const canFavorite = useMemo(() => {
         return !!user && !!skill && skill.ai_approved
     }, [user, skill])
+
+    const currentResourceType = useMemo(() => {
+        return (skill?.resource_type || initialResourceType || 'skill').toLowerCase()
+    }, [skill?.resource_type, initialResourceType])
+
+    const isSkillType = currentResourceType === 'skill'
+    const isRulesType = currentResourceType === 'rules'
+    const isMcpType = currentResourceType === 'mcp'
+    const isToolsType = currentResourceType === 'tools'
+    const requiresReview = isSkillType || isRulesType
+
+    useEffect(() => {
+        if (!isSkillType) return
+        let cancelled = false
+        void fetchSkillInstallConfig()
+            .then(config => {
+                if (cancelled) return
+                setInstallConfig({
+                    github_repo: config.github_repo || 'https://github.com/skillshub/community',
+                    github_base_dir: config.github_base_dir || 'skills',
+                })
+            })
+            .catch(() => {
+                if (cancelled) return
+                setInstallConfig(prev => ({
+                    github_repo: prev.github_repo || 'https://github.com/skillshub/community',
+                    github_base_dir: prev.github_base_dir || 'skills',
+                }))
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [isSkillType])
+
+    const installCommand = useMemo(() => {
+        if (!skill || !isSkillType) return ''
+        const skillKey = normalizeInstallSkillName(skill.name)
+        const installFlag = normalizeInstallFlag(installConfig.github_base_dir)
+        return `npx skills add ${installConfig.github_repo} --${installFlag} ${skillKey}`
+    }, [installConfig.github_base_dir, installConfig.github_repo, isSkillType, skill])
 
     const breadcrumbPrefix = useMemo(() => {
         if (!skill) return 'skills'
@@ -351,6 +310,11 @@ function SkillDetailPage() {
         return getDownloadUrl(skill.id, skill.resource_type)
     }, [skill])
 
+    const hasDownloadAsset = useMemo(() => {
+        if (!skill) return false
+        return !!skill.file_name && (skill.file_size || 0) > 0
+    }, [skill])
+
     const parsedReadme = useMemo(() => parseReadmeFrontMatter(readmeContent), [readmeContent])
     const readmeDescription = useMemo(() => {
         return (parsedReadme.frontMatter.description || '').trim()
@@ -358,7 +322,29 @@ function SkillDetailPage() {
     const displayedReadmeContent = useMemo(() => {
         return parsedReadme.body.trim()
     }, [parsedReadme.body])
-    const aiFunctionSummary = useMemo(() => extractAIFunctionSummary(skill), [skill])
+    const heroDescription = useMemo(() => {
+        if (readmeDescription) return readmeDescription
+        if (isMcpType || isToolsType) return ''
+
+        const plain = (skill?.description || '').trim()
+        if (!plain) return ''
+        if (plain.length > 180) return ''
+        if (/[\n#`>*\-]/.test(plain)) return ''
+        return plain
+    }, [isMcpType, isToolsType, readmeDescription, skill?.description])
+    const renderedMarkdownContent = useMemo(() => {
+        return displayedReadmeContent
+            || ((isMcpType || isToolsType) ? (skill?.description || '').trim() : '')
+            || (skill?.description || '').trim()
+            || t('detail.descriptionFallback')
+    }, [displayedReadmeContent, isMcpType, isToolsType, skill?.description, t])
+    const contentHeaderTitle = useMemo(() => {
+        if (isMcpType) return '正文内容'
+        if (isToolsType) return '正文内容'
+        if (isRulesType) return skill?.file_name || 'RULES.md'
+        return skill?.file_name || 'SKILLS.md'
+    }, [isMcpType, isRulesType, isToolsType, skill?.file_name])
+    const aiSummaryLines = useMemo(() => buildFunctionalSummaryLines(skill, heroDescription), [heroDescription, skill])
     const safetyChecks = useMemo(() => extractSafetyChecks(skill), [skill])
     const deleteSteps: Array<{ stage: DeleteFlowStage; label: string }> = useMemo(() => ([
         { stage: 'db', label: t('detail.deleteStepDb') },
@@ -419,57 +405,74 @@ function SkillDetailPage() {
                         </div>
                     )}
 
-                    {readmeDescription && (
-                        <div className="detail-readme-desc">
-                            <div className="detail-readme-desc-label">{t('detail.readmeDescription')}</div>
-                            <p>{readmeDescription}</p>
+                    {heroDescription && <p className="detail-hero-desc">{heroDescription}</p>}
+
+                    {isSkillType && (
+                        <div className="detail-terminal">
+                            <div className="detail-terminal-text">
+                                <span className="detail-terminal-prompt">$</span>
+                                <span className="detail-terminal-cmd">{installCommand}</span>
+                            </div>
+                            <button
+                                type="button"
+                                className="detail-terminal-copy"
+                                onClick={async () => {
+                                    try {
+                                        await navigator.clipboard.writeText(installCommand)
+                                        const result = await trackDownloadHit(skill.id, skill.resource_type)
+                                        setSkill(prev => prev ? { ...prev, downloads: result.downloads } : prev)
+                                        setCopied(true)
+                                        setTimeout(() => setCopied(false), 1200)
+                                    } catch {
+                                        setCopied(false)
+                                    }
+                                }}
+                            >
+                                {copied ? t('detail.copied') : t('detail.copy')}
+                            </button>
                         </div>
                     )}
 
-                    <div className="detail-terminal">
-                        <div className="detail-terminal-text">
-                            <span className="detail-terminal-prompt">$</span>
-                            <span className="detail-terminal-cmd">{installCommand}</span>
+                    {isMcpType && skill.github_url && (
+                        <div className="detail-terminal">
+                            <div className="detail-terminal-text">
+                                <span className="detail-terminal-prompt">↗</span>
+                                <span className="detail-terminal-cmd">{skill.github_url}</span>
+                            </div>
+                            <a
+                                href={skill.github_url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="detail-terminal-copy"
+                            >
+                                打开
+                            </a>
                         </div>
-                        <button
-                            type="button"
-                            className="detail-terminal-copy"
-                            onClick={async () => {
-                                try {
-                                    await navigator.clipboard.writeText(installCommand)
-                                    const result = await trackDownloadHit(skill.id, skill.resource_type)
-                                    setSkill(prev => prev ? { ...prev, downloads: result.downloads } : prev)
-                                    setCopied(true)
-                                    setTimeout(() => setCopied(false), 1200)
-                                } catch {
-                                    setCopied(false)
-                                }
-                            }}
-                        >
-                            {copied ? t('detail.copied') : t('detail.copy')}
-                        </button>
-                    </div>
+                    )}
 
-                    {/* AI Review summary (2-3 lines) */}
-                    <div className={`detail-ai-review ${skill.ai_approved ? 'approved' : 'rejected'}`}>
-                        <span className="detail-ai-icon">◉</span>
-                        <div className="detail-ai-text">
-                            <div className="detail-ai-label">{t('detail.aiReviewSummary')}</div>
-                            <div className="detail-ai-summary-lines">
-                                <p>{aiFunctionSummary || t('detail.aiReviewFallback')}</p>
+                    {requiresReview && (
+                        <div className={`detail-ai-review ${skill.ai_approved ? 'approved' : 'rejected'}`}>
+                            <span className="detail-ai-icon">◉</span>
+                            <div className="detail-ai-text">
+                                <div className="detail-ai-label">{t('detail.aiReviewSummary')}</div>
+                                <div className="detail-ai-summary-lines">
+                                    {aiSummaryLines.map((line, idx) => (
+                                        <p key={`${idx}-${line}`}>{line}</p>
+                                    ))}
+                                </div>
                             </div>
                         </div>
-                    </div>
+                    )}
 
                     {/* Content / markdown */}
                     <div className="detail-content-header">
-                        <span>{skill.resource_type?.toUpperCase() || 'SKILL'}.md</span>
+                        <span>{contentHeaderTitle}</span>
                     </div>
 
                     <div
                         className="detail-description markdown-body"
                         dangerouslySetInnerHTML={{
-                            __html: parseMarkdown(displayedReadmeContent || readmeDescription || skill.description || t('detail.descriptionFallback'))
+                            __html: parseMarkdown(renderedMarkdownContent)
                         }}
                     />
                 </main>
@@ -499,7 +502,11 @@ function SkillDetailPage() {
 
                     <div className="detail-sidebar-section">
                         <div className="detail-sidebar-label">{t('detail.repository')}</div>
-                        <p className="detail-sidebar-value">skillshub/community</p>
+                        <p className="detail-sidebar-value">
+                            {isMcpType
+                                ? (skill.github_url || '未提供 GitHub 链接')
+                                : installConfig.github_repo.replace(/^https?:\/\/github\.com\//i, '')}
+                        </p>
                     </div>
 
                     <div className="detail-sidebar-section">
@@ -568,183 +575,158 @@ function SkillDetailPage() {
                         </div>
                     </div>
 
-                    <div className="detail-sidebar-section">
-                        <div className="detail-sidebar-label">{t('detail.securityChecks')}</div>
-                        {safetyChecks.length > 0 ? (
-                            <ul className="detail-safety-checks">
-                                {safetyChecks.map((check, idx) => (
-                                    <li key={`${idx}-${check}`}>{check}</li>
-                                ))}
-                            </ul>
-                        ) : (
-                            <div className="security-fail">{t('detail.review')}</div>
-                        )}
-                    </div>
-
-                    <div className="detail-sidebar-section">
-                        <div className="detail-sidebar-label">{t('detail.humanReview')}</div>
-                        <div className={`detail-human-review-status ${humanReviewStatus}`}>
-                            {humanReviewStatus === 'approved' && t('detail.humanReviewApproved')}
-                            {humanReviewStatus === 'pending' && t('detail.humanReviewPending')}
-                            {humanReviewStatus === 'rejected' && t('detail.humanReviewRejected')}
+                    {requiresReview && (
+                        <div className="detail-sidebar-section">
+                            <div className="detail-sidebar-label">{t('detail.securityChecks')}</div>
+                            {safetyChecks.length > 0 ? (
+                                <ul className="detail-safety-checks">
+                                    {safetyChecks.map((check, idx) => (
+                                        <li key={`${idx}-${check}`}>{check}</li>
+                                    ))}
+                                </ul>
+                            ) : (
+                                <div className="security-fail">{t('detail.review')}</div>
+                            )}
                         </div>
-                        {skill.human_reviewer && (
-                            <small className="detail-sidebar-value">
-                                {t('detail.reviewedBy', { user: skill.human_reviewer })}
-                            </small>
+                    )}
+
+                    {requiresReview && (
+                        <div className="detail-sidebar-section">
+                            <div className="detail-sidebar-label">{t('detail.humanReview')}</div>
+                            <div className={`detail-human-review-status ${humanReviewStatus}`}>
+                                {humanReviewStatus === 'approved' && t('detail.humanReviewApproved')}
+                                {humanReviewStatus === 'pending' && t('detail.humanReviewPending')}
+                                {humanReviewStatus === 'rejected' && t('detail.humanReviewRejected')}
+                            </div>
+                            {skill.human_reviewer && (
+                                <small className="detail-sidebar-value">
+                                    {t('detail.reviewedBy', { user: skill.human_reviewer })}
+                                </small>
+                            )}
+                            {canManage && humanReviewStatus === 'pending' && (
+                                <small className="detail-sidebar-value">{t('detail.humanReviewNeedOtherUser')}</small>
+                            )}
+                            {canHumanReview && (
+                                <button
+                                    type="button"
+                                    className="btn btn-primary"
+                                    onClick={async () => {
+                                        setReviewingHuman(true)
+                                        try {
+                                            const updated = await submitHumanReview(skill.id, skill.resource_type || 'skill', true)
+                                            setSkill(updated)
+                                        } catch (err) {
+                                            await showAlert(err instanceof Error ? err.message : t('detail.humanReviewFailed'))
+                                        } finally {
+                                            setReviewingHuman(false)
+                                        }
+                                    }}
+                                    disabled={reviewingHuman}
+                                >
+                                    {reviewingHuman ? t('detail.humanReviewSubmitting') : t('detail.confirmHumanReview')}
+                                </button>
+                            )}
+                        </div>
+                    )}
+
+                    <div className="detail-sidebar-section detail-actions">
+                        {hasDownloadAsset && (
+                            <a href={downloadPath} className="btn btn-primary">
+                                {isPublished ? t('detail.download') : t('detail.downloadPending')}
+                            </a>
                         )}
-                        {canManage && humanReviewStatus === 'pending' && (
-                            <small className="detail-sidebar-value">{t('detail.humanReviewNeedOtherUser')}</small>
+                        {isMcpType && skill.github_url && (
+                            <a href={skill.github_url} target="_blank" rel="noreferrer" className="btn btn-primary">
+                                打开 GitHub
+                            </a>
                         )}
-                        {canHumanReview && (
+                        {isSkillType && (
                             <button
-                                type="button"
-                                className="btn btn-primary"
+                                className="btn btn-secondary"
+                                onClick={() => {
+                                    navigate('/resource/skill/upload', {
+                                        state: {
+                                            resourceType: 'skill',
+                                            prefill: {
+                                                source_skill_id: skill.id,
+                                                name: skill.name,
+                                                description: skill.description || '',
+                                                tags: skill.tags || '',
+                                                thumbnail_url: skill.thumbnail_url || '',
+                                            },
+                                        },
+                                    })
+                                }}
+                            >
+                                {t('detail.update')}
+                            </button>
+                        )}
+                        {canManage && !isSkillType && (
+                            <button
+                                className="btn btn-secondary"
+                                onClick={() => navigate(`/resource/${currentResourceType}/upload?edit=${skill.id}`)}
+                                disabled={deleting}
+                            >
+                                {t('detail.edit')}
+                            </button>
+                        )}
+                        {canManage && (
+                            <button
+                                className="btn btn-secondary"
                                 onClick={async () => {
-                                    setReviewingHuman(true)
+                                    if (!(await showConfirm(t('detail.confirmDelete')))) return
+                                    const isSkillResource = (skill.resource_type || 'skill') === 'skill'
+                                    if (isSkillResource) {
+                                        setDeleteStage('db')
+                                        setDeleteGithubWarning('')
+                                        setDeleteModalOpen(true)
+                                    }
+                                    setDeleting(true)
                                     try {
-                                        const updated = await submitHumanReview(skill.id, true)
-                                        setSkill(updated)
+                                        if (isSkillResource) {
+                                            const result = await deleteSkillWithProgress(
+                                                skill.id,
+                                                skill.resource_type,
+                                                (stage) => setDeleteStage(stage),
+                                            )
+                                            if (result.github_error) {
+                                                setDeleteGithubWarning(result.github_error)
+                                            }
+                                            setDeleteStage('done')
+                                            await new Promise(resolve => setTimeout(resolve, 420))
+                                        } else {
+                                            await deleteSkill(skill.id, skill.resource_type)
+                                        }
+                                        navigate(`/resource/${skill.resource_type || 'skill'}`)
                                     } catch (err) {
-                                        await showAlert(err instanceof Error ? err.message : t('detail.humanReviewFailed'))
+                                        if (isSkillResource) {
+                                            setDeleteModalOpen(false)
+                                        }
+                                        await showAlert(err instanceof Error ? err.message : t('detail.deleteFailed'))
                                     } finally {
-                                        setReviewingHuman(false)
+                                        setDeleting(false)
                                     }
                                 }}
-                                disabled={reviewingHuman}
+                                disabled={deleting}
                             >
-                                {reviewingHuman ? t('detail.humanReviewSubmitting') : t('detail.confirmHumanReview')}
+                                {deleting ? t('detail.deleting') : t('detail.delete')}
                             </button>
                         )}
                     </div>
 
-                    <div className="detail-sidebar-section detail-actions">
-                        <a href={downloadPath} className="btn btn-primary">
-                            {isPublished ? t('detail.download') : t('detail.downloadPending')}
-                        </a>
-                        {canManage && (
-                            <>
-                                <button
-                                    className="btn btn-secondary"
-                                    onClick={() => {
-                                        if (!editing) {
-                                            setEditName(skill.name)
-                                            setEditDescription(skill.description || '')
-                                        }
-                                        setEditing(prev => !prev)
-                                    }}
-                                    disabled={savingEdit || deleting}
-                                >
-                                    {editing ? t('detail.cancelEdit') : t('detail.edit')}
-                                </button>
-                                <button
-                                    className="btn btn-secondary"
-                                    onClick={async () => {
-                                        if (!(await showConfirm(t('detail.confirmDelete')))) return
-                                        const isSkillResource = (skill.resource_type || 'skill') === 'skill'
-                                        if (isSkillResource) {
-                                            setDeleteStage('db')
-                                            setDeleteGithubWarning('')
-                                            setDeleteModalOpen(true)
-                                        }
-                                        setDeleting(true)
-                                        try {
-                                            if (isSkillResource) {
-                                                const result = await deleteSkillWithProgress(
-                                                    skill.id,
-                                                    skill.resource_type,
-                                                    (stage) => setDeleteStage(stage),
-                                                )
-                                                if (result.github_error) {
-                                                    setDeleteGithubWarning(result.github_error)
-                                                }
-                                                setDeleteStage('done')
-                                                await new Promise(resolve => setTimeout(resolve, 420))
-                                            } else {
-                                                await deleteSkill(skill.id, skill.resource_type)
-                                            }
-                                            navigate(`/resource/${skill.resource_type || 'skill'}`)
-                                        } catch (err) {
-                                            if (isSkillResource) {
-                                                setDeleteModalOpen(false)
-                                            }
-                                            await showAlert(err instanceof Error ? err.message : t('detail.deleteFailed'))
-                                        } finally {
-                                            setDeleting(false)
-                                        }
-                                    }}
-                                    disabled={deleting || savingEdit}
-                                >
-                                    {deleting ? t('detail.deleting') : t('detail.delete')}
-                                </button>
-                            </>
-                        )}
-                    </div>
-
-                    {canManage && editing && (
-                        <div className="detail-sidebar-section detail-owner-editor">
-                            <h4>{t('detail.editResource')}</h4>
-                            <label>
-                                <span>{t('detail.editName')}</span>
-                                <input
-                                    value={editName}
-                                    onChange={e => setEditName(e.target.value)}
-                                    disabled={savingEdit}
-                                />
-                            </label>
-                            <label>
-                                <span>{t('detail.editDescription')}</span>
-                                <textarea
-                                    value={editDescription}
-                                    onChange={e => setEditDescription(e.target.value)}
-                                    disabled={savingEdit}
-                                />
-                            </label>
-
-                            <div className="detail-owner-editor-actions">
-                                <button
-                                    className="btn btn-primary"
-                                    onClick={async () => {
-                                        const name = editName.trim()
-                                        if (!name) {
-                                            await showAlert(t('upload.enterTitle'))
-                                            return
-                                        }
-
-                                        setSavingEdit(true)
-                                        try {
-                                            const updated = await updateSkill(skill.id, {
-                                                name,
-                                                description: editDescription,
-                                            }, skill.resource_type)
-                                            setSkill(updated)
-                                            setEditing(false)
-                                        } catch (err) {
-                                            await showAlert(err instanceof Error ? err.message : t('detail.updateFailed'))
-                                        } finally {
-                                            setSavingEdit(false)
-                                        }
-                                    }}
-                                    disabled={savingEdit}
-                                >
-                                    {savingEdit ? t('detail.saving') : t('detail.save')}
-                                </button>
-                                <button
-                                    className="btn btn-secondary"
-                                    onClick={() => setEditing(false)}
-                                    disabled={savingEdit}
-                                >
-                                    {t('detail.cancelEdit')}
-                                </button>
-                            </div>
+                    {(hasDownloadAsset || isMcpType) && (
+                        <div className="detail-sidebar-section">
+                            <div className="detail-sidebar-label">{t('detail.fileInfo')}</div>
+                            {hasDownloadAsset ? (
+                                <>
+                                    <small className="detail-sidebar-value">{skill.file_name}</small>
+                                    <small className="detail-sidebar-value">{formatSize(skill.file_size)}</small>
+                                </>
+                            ) : (
+                                <small className="detail-sidebar-value">无本地附件</small>
+                            )}
                         </div>
                     )}
-
-                    <div className="detail-sidebar-section">
-                        <div className="detail-sidebar-label">{t('detail.fileInfo')}</div>
-                        <small className="detail-sidebar-value">{skill.file_name}</small>
-                        <small className="detail-sidebar-value">{formatSize(skill.file_size)}</small>
-                    </div>
                 </aside>
             </div>
 

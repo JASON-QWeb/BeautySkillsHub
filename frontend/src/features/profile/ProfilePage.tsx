@@ -6,11 +6,6 @@ import { Skill, fetchMyFavorites, fetchSkills } from '../../services/api'
 
 type TabKey = 'uploads' | 'saved' | 'activity'
 
-function normalizeAuthorKey(skill: Skill): string {
-    if (skill.user_id && skill.user_id > 0) return `u:${skill.user_id}`
-    return `a:${(skill.author || '').trim().toLowerCase()}`
-}
-
 function isOwnedByUser(skill: Skill, userID: number, username: string): boolean {
     if (skill.user_id && skill.user_id > 0) return skill.user_id === userID
     return (skill.author || '').trim().toLowerCase() === username.trim().toLowerCase()
@@ -120,30 +115,7 @@ function ProfilePage() {
         return authoredSkills.reduce((sum, skill) => sum + (skill.likes_count || 0), 0)
     }, [authoredSkills])
 
-    const downloadRank = useMemo(() => {
-        if (!user || skills.length === 0) return null
-
-        const totalsByAuthor = new Map<string, number>()
-        for (const skill of skills) {
-            const key = normalizeAuthorKey(skill)
-            if (!key || key === 'a:') continue
-            totalsByAuthor.set(key, (totalsByAuthor.get(key) || 0) + (skill.downloads || 0))
-        }
-
-        let currentKey = `u:${user.id}`
-        let currentTotal = totalsByAuthor.get(currentKey)
-        if (currentTotal === undefined) {
-            currentKey = `a:${user.username.toLowerCase()}`
-            currentTotal = totalsByAuthor.get(currentKey)
-        }
-        if (currentTotal === undefined) return null
-
-        let higherCount = 0
-        for (const value of totalsByAuthor.values()) {
-            if (value > currentTotal) higherCount += 1
-        }
-        return higherCount + 1
-    }, [skills, user])
+    const totalFavorites = favoriteSkills.length
 
     const filterAndSortByDownloads = (source: Skill[]) => {
         const keyword = search.trim().toLowerCase()
@@ -270,8 +242,8 @@ function ProfilePage() {
                             <strong>{authoredSkills.length}</strong>
                         </div>
                         <div>
-                            <p>{t('profile.globalRank')}</p>
-                            <strong className="success">{downloadRank ? `#${downloadRank}` : '-'}</strong>
+                            <p>{t('profile.totalFavorites')}</p>
+                            <strong className="success">{totalFavorites}</strong>
                         </div>
                     </div>
                 </div>

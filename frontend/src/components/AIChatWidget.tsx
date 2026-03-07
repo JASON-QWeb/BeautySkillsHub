@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useI18n } from '../i18n/I18nProvider'
 import { chatWithAI } from '../services/api'
 import { SkillsIntroModal } from './SkillsIntroModal'
+import { SkillsInstallModal } from './SkillsInstallModal'
 import { AIChatCharacter, SKINS, SkinType } from './AIChatCharacter'
 
 interface Message {
@@ -9,11 +10,20 @@ interface Message {
     content: string
 }
 
+const RECOMMENDATION_PROMPTS = [
+    '介绍一下Skills',
+    '目前有哪些skills',
+    '如何安装skills',
+]
+const ACTION_SHOW_INTRO_MODAL = '[ACTION:SHOW_INTRO_MODAL]'
+const ACTION_SHOW_INSTALL_MODAL = '[ACTION:SHOW_INSTALL_MODAL]'
+
 function AIChatWidget() {
     const { t } = useI18n()
     const greeting = t('chat.greeting')
     const [isOpen, setIsOpen] = useState(false)
     const [isSkillsModalOpen, setIsSkillsModalOpen] = useState(false)
+    const [isSkillsInstallModalOpen, setIsSkillsInstallModalOpen] = useState(false)
     const [showOnboarding, setShowOnboarding] = useState(false)
     const [messages, setMessages] = useState<Message[]>([{ role: 'assistant', content: greeting }])
     const [input, setInput] = useState('')
@@ -25,6 +35,7 @@ function AIChatWidget() {
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
     const INTRO_TRIGGERS = ['介绍一下skills', '介绍一下 skills', 'skills是什么', '什么是skills', '介绍skills', '介绍一下Skills']
+    const INSTALL_TRIGGERS = ['如何安装skills', '如何安装 skills', '安装skills', '安装 skills', '怎么安装skills', '怎么安装 skills']
     
     useEffect(() => {
         if (!localStorage.getItem('ai_onboarding_seen')) {
@@ -80,8 +91,13 @@ function AIChatWidget() {
         setMessages(prev => [...prev, { role: 'user', content: userMsg }])
         
         // Frontend Interception
+        if (INSTALL_TRIGGERS.some(trigger => userMsg.toLowerCase() === trigger.toLowerCase())) {
+            setMessages(prev => [...prev, { role: 'assistant', content: ACTION_SHOW_INSTALL_MODAL }])
+            return
+        }
+
         if (INTRO_TRIGGERS.some(trigger => userMsg.toLowerCase() === trigger.toLowerCase())) {
-            setMessages(prev => [...prev, { role: 'assistant', content: '[ACTION:SHOW_INTRO_MODAL]' }])
+            setMessages(prev => [...prev, { role: 'assistant', content: ACTION_SHOW_INTRO_MODAL }])
             return
         }
 
@@ -127,7 +143,7 @@ function AIChatWidget() {
                 isTyping={isLoading}
                 showOnboarding={showOnboarding}
                 onClick={handleOpenChat}
-                style={{ opacity: (isOpen || isSkillsModalOpen) ? 0 : 1, pointerEvents: (isOpen || isSkillsModalOpen) ? 'none' : 'auto' }}
+                style={{ opacity: (isOpen || isSkillsModalOpen || isSkillsInstallModalOpen) ? 0 : 1, pointerEvents: (isOpen || isSkillsModalOpen || isSkillsInstallModalOpen) ? 'none' : 'auto' }}
             />
 
             {/* Chat Modal */}
@@ -168,39 +184,22 @@ function AIChatWidget() {
                 <div className="ai-chat-messages">
                     {messages.map((msg, i) => (
                         <div key={i} className={`chat-message ${msg.role}`}>
-                            {msg.content === '[ACTION:SHOW_INTRO_MODAL]' ? (
+                            {msg.content === ACTION_SHOW_INTRO_MODAL ? (
                                 <button 
                                     className="chat-action-btn" 
                                     onClick={() => setIsSkillsModalOpen(true)}
                                 >
                                     📖 点击查看 Skills 介绍
                                 </button>
+                            ) : msg.content === ACTION_SHOW_INSTALL_MODAL ? (
+                                <button
+                                    className="chat-action-btn"
+                                    onClick={() => setIsSkillsInstallModalOpen(true)}
+                                >
+                                    🛠 点击查看 Skills 安装教程
+                                </button>
                             ) : (
                                 msg.content
-                            )}
-                            
-                            {/* Recommendation chips below the first greeting */}
-                            {i === 0 && messages.length === 1 && (
-                                <div className="chat-recommendations">
-                                    <button 
-                                        className="chat-recommendation-chip"
-                                        onClick={() => handleSend('介绍一下Skills')}
-                                    >
-                                        介绍一下Skills
-                                    </button>
-                                    <button 
-                                        className="chat-recommendation-chip"
-                                        onClick={() => handleSend('目前有哪些skills')}
-                                    >
-                                        目前有哪些skills
-                                    </button>
-                                    <button 
-                                        className="chat-recommendation-chip"
-                                        onClick={() => handleSend('如何安装skills')}
-                                    >
-                                        如何安装skills
-                                    </button>
-                                </div>
                             )}
                         </div>
                     ))}
@@ -210,6 +209,21 @@ function AIChatWidget() {
                         </div>
                     )}
                     <div ref={messagesEndRef} />
+                </div>
+
+                <div className="ai-chat-quick-actions">
+                    <div className="chat-recommendations">
+                        {RECOMMENDATION_PROMPTS.map((prompt) => (
+                            <button
+                                key={prompt}
+                                className="chat-recommendation-chip"
+                                onClick={() => handleSend(prompt)}
+                                disabled={isLoading}
+                            >
+                                {prompt}
+                            </button>
+                        ))}
+                    </div>
                 </div>
 
                 <div className="ai-chat-input">
@@ -230,6 +244,11 @@ function AIChatWidget() {
             <SkillsIntroModal 
                 isOpen={isSkillsModalOpen} 
                 onClose={() => setIsSkillsModalOpen(false)} 
+            />
+
+            <SkillsInstallModal
+                isOpen={isSkillsInstallModalOpen}
+                onClose={() => setIsSkillsInstallModalOpen(false)}
             />
         </>
     )

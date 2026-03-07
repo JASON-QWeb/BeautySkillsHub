@@ -89,6 +89,7 @@ func main() {
 
 	// Initialize handlers
 	skillHandler := handler.NewSkillHandler(skillSvc, aiSvc, githubSyncSvc, skillContextProvider, cfg)
+	contentAssetHandler := handler.NewContentAssetHandler(cfg.UploadDir)
 	mcpHandler := handler.NewResourceHandler(skillSvc, "mcp", cfg)
 	toolsHandler := handler.NewResourceHandler(skillSvc, "tools", cfg)
 	rulesHandler := handler.NewResourceHandler(skillSvc, "rules", cfg)
@@ -113,6 +114,7 @@ func main() {
 		publicReads.GET("/skills", skillHandler.ListSkills)
 		publicReads.GET("/skills/summary", skillHandler.GetSkillSummary)
 		publicReads.GET("/skills/trending", skillHandler.GetTrending)
+		publicReads.GET("/skills/install-config", skillHandler.GetSkillInstallConfig)
 		publicReads.GET("/skills/:id", skillHandler.GetSkill)
 		publicReads.GET("/skills/:id/readme", skillHandler.GetSkillReadme)
 		publicReads.GET("/skills/:id/download", skillHandler.DownloadSkill)
@@ -136,6 +138,8 @@ func main() {
 
 		// Thumbnail serving
 		api.GET("/thumbnails/:filename", skillHandler.ServeThumbnail)
+		api.GET("/content-assets/:filename", contentAssetHandler.ServeImage)
+		api.POST("/content-assets/images", authHandler.AuthMiddleware(), contentAssetHandler.UploadImage)
 
 		// Avatar serving
 		api.GET("/avatars/:filename", authHandler.ServeAvatar)
@@ -149,8 +153,30 @@ func main() {
 		// Tools resource routes
 		handler.RegisterResourceRoutes(api, toolsHandler, authHandler.AuthMiddleware(), authHandler.OptionalAuthMiddleware(), "/tools")
 
-		// Rules resource routes
-		handler.RegisterResourceRoutes(api, rulesHandler, authHandler.AuthMiddleware(), authHandler.OptionalAuthMiddleware(), "/rules")
+		// Rules resource routes (rules require AI + human review)
+		rulesPublic := api.Group("/rules")
+		rulesPublic.Use(authHandler.OptionalAuthMiddleware())
+		rulesPublic.GET("", rulesHandler.List)
+		rulesPublic.GET("/summary", rulesHandler.GetSummary)
+		rulesPublic.GET("/trending", rulesHandler.GetTrending)
+		rulesPublic.GET("/categories", rulesHandler.GetCategories)
+		rulesPublic.GET("/:id", rulesHandler.Get)
+		rulesPublic.GET("/:id/readme", rulesHandler.GetReadme)
+		rulesPublic.GET("/:id/download", rulesHandler.Download)
+		rulesPublic.POST("/:id/download-hit", rulesHandler.TrackDownloadHit)
+
+		rulesProtected := api.Group("/rules")
+		rulesProtected.Use(authHandler.AuthMiddleware())
+		rulesProtected.POST("", skillHandler.UploadSkill)
+		rulesProtected.GET("/:id/review-status", skillHandler.GetSkillReviewStatus)
+		rulesProtected.POST("/:id/review/retry", skillHandler.RetrySkillReview)
+		rulesProtected.POST("/:id/human-review", skillHandler.HumanReviewSkill)
+		rulesProtected.PUT("/:id", rulesHandler.Update)
+		rulesProtected.DELETE("/:id", rulesHandler.Delete)
+		rulesProtected.POST("/:id/like", rulesHandler.Like)
+		rulesProtected.DELETE("/:id/like", rulesHandler.Unlike)
+		rulesProtected.POST("/:id/favorite", rulesHandler.AddFavorite)
+		rulesProtected.DELETE("/:id/favorite", rulesHandler.RemoveFavorite)
 	}
 
 	// Start server

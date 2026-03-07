@@ -42,7 +42,7 @@ function TrendingList() {
                     <div
                         key={skill.id}
                         className="trending-item"
-                        onClick={() => navigate(`/skill/${skill.id}`)}
+                        onClick={() => navigate(`/resource/${skill.resource_type || 'skill'}/${skill.id}`, { state: { resourceType: skill.resource_type } })}
                     >
                         <span className={`trending-rank ${index < 3 ? 'top-3' : ''}`}>
                             {index + 1}

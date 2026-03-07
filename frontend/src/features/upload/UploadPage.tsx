@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useI18n } from '../../i18n/I18nProvider'
 import { RESOURCE_TYPES, Skill, SkillReviewStatusResponse, fetchSkillReviewStatus, retrySkillReview, uploadSkill, getDownloadUrl } from '../../services/api'
 import { useDialog } from '../../contexts/DialogContext'
+import FlowStepIcon from '../../components/FlowStepIcon'
 
 const MAX_TAGS = 5
 const THUMB_TARGET_WIDTH = 1200
@@ -37,6 +38,19 @@ interface CropArea {
     sy: number
     sw: number
     sh: number
+}
+
+interface UploadPrefillState {
+    source_skill_id?: number
+    name?: string
+    description?: string
+    tags?: string
+    thumbnail_url?: string
+}
+
+interface UploadLocationState {
+    resourceType?: string
+    prefill?: UploadPrefillState
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -104,6 +118,35 @@ function buildThumbnailFileName(name: string) {
     return `${safeBase}_thumb.jpg`
 }
 
+function normalizePrefillTags(rawTags: string) {
+    const seen = new Set<string>()
+    const tags: string[] = []
+    rawTags
+        .split(/[\n\r,]+/)
+        .map(tag => tag.trim().toLowerCase())
+        .filter(Boolean)
+        .forEach(tag => {
+            if (seen.has(tag) || tags.length >= MAX_TAGS) return
+            seen.add(tag)
+            tags.push(tag)
+        })
+    return tags
+}
+
+async function loadThumbnailFileFromURL(url: string, fallbackName: string) {
+    const response = await fetch(url)
+    if (!response.ok) {
+        throw new Error('load prefill thumbnail failed')
+    }
+    const blob = await response.blob()
+    const guessedName = url.split('/').pop()?.split('?')[0]?.trim() || buildThumbnailFileName(fallbackName)
+    const fileName = guessedName || buildThumbnailFileName(fallbackName)
+    return new File([blob], fileName, {
+        type: blob.type || 'image/jpeg',
+        lastModified: Date.now(),
+    })
+}
+
 async function makeCroppedThumbnail(cropState: ThumbnailCropState) {
     const image = await loadImageObject(cropState.previewUrl)
     const area = computeCropArea(cropState.meta, cropState.zoom, cropState.centerX, cropState.centerY)
@@ -164,13 +207,14 @@ function drawCropPreview(canvas: HTMLCanvasElement, image: HTMLImageElement, cro
 }
 
 function UploadPage() {
-    const [searchParams] = useSearchParams()
+    const navigate = useNavigate()
+    const location = useLocation()
     const { t } = useI18n()
     const { user } = useAuth()
     const { showAlert } = useDialog()
 
-    const initialType = searchParams.get('type') || 'skill'
-    const [resourceType, setResourceType] = useState(initialType in RESOURCE_TYPES ? initialType : 'skill')
+    const resourceType = 'skill'
+    const reviewedUploadTypes: Array<'skill' | 'rules'> = ['skill', 'rules']
     const [name, setName] = useState('')
     const [description, setDescription] = useState('')
     const [tagInput, setTagInput] = useState('')
@@ -182,6 +226,7 @@ function UploadPage() {
     const [thumbnail, setThumbnail] = useState<File | null>(null)
     const [thumbnailCrop, setThumbnailCrop] = useState<ThumbnailCropState | null>(null)
     const [thumbnailPreviewUrl, setThumbnailPreviewUrl] = useState('')
+    const [prefillThumbnailUrl, setPrefillThumbnailUrl] = useState('')
     const [cropApplying, setCropApplying] = useState(false)
 
     const [step, setStep] = useState(1)
@@ -197,6 +242,12 @@ function UploadPage() {
     const cropPreviewRef = useRef<HTMLCanvasElement>(null)
     const cropImageRef = useRef<HTMLImageElement | null>(null)
     const reviewPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+    const prefillAppliedRef = useRef(false)
+
+    const prefill = useMemo(
+        () => ((location.state as UploadLocationState | null)?.prefill || null),
+        [location.state],
+    )
 
     useEffect(() => {
         if (!thumbnail) {
@@ -208,6 +259,31 @@ function UploadPage() {
         setThumbnailPreviewUrl(url)
         return () => URL.revokeObjectURL(url)
     }, [thumbnail])
+
+    useEffect(() => {
+        if (!prefill || prefillAppliedRef.current) return
+        prefillAppliedRef.current = true
+
+        if (prefill.name?.trim()) {
+            setName(prefill.name.trim())
+        }
+        if (prefill.description?.trim()) {
+            setDescription(prefill.description.trim())
+        }
+        if (prefill.tags?.trim()) {
+            setTagItems(normalizePrefillTags(prefill.tags))
+        }
+
+        const thumbURL = prefill.thumbnail_url?.trim() || ''
+        if (!thumbURL) return
+        setPrefillThumbnailUrl(thumbURL)
+
+        void loadThumbnailFileFromURL(thumbURL, prefill.name || 'skill')
+            .then(file => setThumbnail(file))
+            .catch(() => {
+                // Keep preview URL fallback when image fetch is blocked.
+            })
+    }, [prefill])
 
     useEffect(() => {
         if (!thumbnailCrop) {
@@ -251,7 +327,7 @@ function UploadPage() {
         return name.trim() || t('upload.titlePlaceholder')
     }, [uploadedSkill, name, t])
 
-    const compactThumb = uploadedSkill?.thumbnail_url || thumbnailPreviewUrl
+    const compactThumb = uploadedSkill?.thumbnail_url || thumbnailPreviewUrl || prefillThumbnailUrl
 
     const closeThumbnailCropModal = (clearSelection: boolean) => {
         setThumbnailCrop(prev => {
@@ -264,6 +340,7 @@ function UploadPage() {
         cropImageRef.current = null
         if (clearSelection) {
             setThumbnail(null)
+            setPrefillThumbnailUrl('')
             if (thumbInputRef.current) {
                 thumbInputRef.current.value = ''
             }
@@ -285,6 +362,7 @@ function UploadPage() {
         try {
             const meta = await readImageMeta(selected)
             if (isThumbnailSizeReasonable(meta)) {
+                setPrefillThumbnailUrl('')
                 setThumbnail(selected)
                 return
             }
@@ -340,7 +418,7 @@ function UploadPage() {
     }
 
     const addTag = (rawTag: string) => {
-        const normalized = rawTag.trim().replace(/,+$/g, '')
+        const normalized = rawTag.trim().replace(/,+$/g, '').toLowerCase()
         if (!normalized) return
 
         if (tagItems.length >= MAX_TAGS) {
@@ -348,7 +426,7 @@ function UploadPage() {
             return
         }
 
-        const alreadyExists = tagItems.some(tag => tag.toLowerCase() === normalized.toLowerCase())
+        const alreadyExists = tagItems.some(tag => tag === normalized)
         if (alreadyExists) {
             setTagInput('')
             return
@@ -458,6 +536,7 @@ function UploadPage() {
         setFile(null)
         setFolderFiles([])
         setThumbnail(null)
+        setPrefillThumbnailUrl('')
         if (fileInputRef.current) {
             fileInputRef.current.value = ''
         }
@@ -495,6 +574,9 @@ function UploadPage() {
         formData.append('author', user?.username || 'Anonymous')
         formData.append('upload_mode', uploadMode)
         formData.append('tags', tagItems.join(','))
+        if (prefill?.source_skill_id) {
+            formData.append('source_skill_id', String(prefill.source_skill_id))
+        }
 
         if (uploadMode === 'file' && file) {
             formData.append('file', file)
@@ -522,20 +604,11 @@ function UploadPage() {
         try {
             const result = await uploadSkill(formData)
             setUploadedSkill(result.skill)
-
-            // Non-skill types are auto-published (no AI review needed)
-            if (resourceType !== 'skill') {
-                setReviewStatus('approved')
-                setFeedback(t('upload.reviewApprovedFallback'))
-                setStep(3)
-                clearReviewPolling()
-            } else {
-                setReviewStatus('pending')
-                setFeedback(result.feedback || '审核排队中，请稍候...')
-                setReviewMeta(null)
-                if (result.skill?.id) {
-                    startReviewPolling(result.skill.id)
-                }
+            setReviewStatus('pending')
+            setFeedback(result.feedback || '审核排队中，请稍候...')
+            setReviewMeta(null)
+            if (result.skill?.id) {
+                startReviewPolling(result.skill.id)
             }
         } catch (err) {
             setReviewStatus('rejected')
@@ -552,7 +625,7 @@ function UploadPage() {
             setReviewStatus('pending')
             setFeedback('重新触发审核中...')
             setReviewMeta(null)
-            await retrySkillReview(uploadedSkill.id)
+            await retrySkillReview(uploadedSkill.id, resourceType)
             startReviewPolling(uploadedSkill.id)
         } catch (err) {
             setReviewStatus('rejected')
@@ -576,7 +649,7 @@ function UploadPage() {
             ? t('review.functionalSummaryNeedsFix', { count: aiProgressFailed })
             : (feedback || t('upload.reviewRejectedFallback')))
 
-    const showExpandedAIReview = step >= 2 && (resourceType === 'skill' || step === 2)
+    const showExpandedAIReview = step >= 2
 
     return (
         <div className="upload-page page-enter">
@@ -586,17 +659,17 @@ function UploadPage() {
 
             <div className="upload-steps single-line">
                 <div className={`step ${step >= 1 ? 'active' : ''}`}>
-                    <div className="step-circle">↥</div>
+                    <div className="step-circle"><FlowStepIcon kind="upload" /></div>
                     <span className="step-label">{t('upload.stepUser')}</span>
                 </div>
                 <div className={`step-connector ${step >= 2 ? 'active' : ''}`} />
                 <div className={`step ${step >= 2 ? 'active' : ''}`}>
-                    <div className="step-circle">◎</div>
+                    <div className="step-circle"><FlowStepIcon kind="ai" /></div>
                     <span className="step-label">{t('upload.stepAi')}</span>
                 </div>
                 <div className={`step-connector ${step >= 3 ? 'active' : ''}`} />
                 <div className={`step ${step >= 3 ? 'active' : ''}`}>
-                    <div className="step-circle">◍</div>
+                    <div className="step-circle"><FlowStepIcon kind="human" /></div>
                     <span className="step-label">{t('upload.stepHuman')}</span>
                 </div>
             </div>
@@ -606,20 +679,23 @@ function UploadPage() {
                     {step === 1 ? (
                         <form className="upload-form-card glass-card" onSubmit={handleSubmit}>
                             <header>
-                                <h1>{t('upload.title')}</h1>
-                                <p>{t('upload.subtitle')}</p>
+                                <h1>上传 Skills</h1>
+                                <p>支持上传文件或文件夹内容。</p>
                             </header>
 
                             <div className="upload-type-tabs">
-                                {Object.entries(RESOURCE_TYPES).map(([key, value]) => (
+                                {reviewedUploadTypes.map((key) => (
                                     <button
                                         key={key}
                                         type="button"
-                                        className={resourceType === key ? 'active' : ''}
-                                        onClick={() => setResourceType(key)}
+                                        className={key === 'skill' ? 'active' : ''}
+                                        onClick={() => {
+                                            if (key === 'skill') return
+                                            navigate(`/resource/${key}/upload`)
+                                        }}
                                         disabled={uploading}
                                     >
-                                        {value.label}
+                                        {RESOURCE_TYPES[key].label}
                                     </button>
                                 ))}
                             </div>
@@ -711,7 +787,9 @@ function UploadPage() {
                                 <button type="button" className="upload-dropzone" onClick={() => thumbInputRef.current?.click()}>
                                     <strong>{t('upload.uploadThumbnail')}</strong>
                                     <span>{t('upload.thumbnailHint')}</span>
-                                    {thumbnail && <em>{thumbnail.name}</em>}
+                                    {thumbnail
+                                        ? <em>{thumbnail.name}</em>
+                                        : (prefillThumbnailUrl && <em>使用当前缩略图</em>)}
                                     <input
                                         ref={thumbInputRef}
                                         type="file"
@@ -932,29 +1010,7 @@ function UploadPage() {
                     {step < 3 ? (
                         <div className="upload-placeholder-card glass-card">
                             <strong>{t('upload.waitForStep')}</strong>
-                            <p>{resourceType === 'skill' ? t('upload.stepHuman') : t('upload.stepPublish')}</p>
-                        </div>
-                    ) : resourceType !== 'skill' ? (
-                        <div className="upload-review-card upload-human-card glass-card">
-                            <h2>{t('upload.publishedTitle')}</h2>
-                            <div className="review-status approved">
-                                <strong>{t('upload.publishedSuccess')}</strong>
-                                <p>{t('upload.publishedDescription')}</p>
-                            </div>
-
-                            <div className="review-actions">
-                                {uploadedSkill && (
-                                    <Link
-                                        to={`/resource/${resourceType}`}
-                                        className="btn btn-primary"
-                                    >
-                                        {t('upload.viewResource')}
-                                    </Link>
-                                )}
-                                <button type="button" className="btn btn-secondary" onClick={resetState}>
-                                    {t('upload.uploadAnother')}
-                                </button>
-                            </div>
+                            <p>{t('upload.stepHuman')}</p>
                         </div>
                     ) : (
                         <div className="upload-review-card upload-human-card glass-card">

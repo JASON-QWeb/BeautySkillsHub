@@ -35,27 +35,64 @@ docker compose logs -f backend
 docker compose down
 ```
 
-### 本地开发
+### Development（本地开发）
 
 环境要求：
 - Go `1.25+`
 - Node.js `20+`
+- npm `10+`
 
-后端：
+首次准备：
+
+```bash
+cp backend/.env.example backend/.env
+# 按需编辑 backend/.env（JWT_SECRET / OPENAI / GitHub）
+```
+
+启动后端（终端 1）：
 
 ```bash
 cd backend
-cp .env.example .env
 go run cmd/server/main.go
 ```
 
-前端：
+启动前端（终端 2）：
 
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
+
+开发访问地址：
+- 前端（Vite）：`http://localhost:5173`
+- 后端 API：`http://localhost:8080/api/...`
+- 前端已配置 `/api` 代理到 `http://localhost:8080`
+
+常用开发命令：
+
+```bash
+# 清空本地数据（重置 SQLite + 上传目录）
+./scripts/clear-db-data.sh
+
+# 后端测试
+cd backend && go test ./...
+
+# 前端构建校验
+cd frontend && npm run build
+```
+
+资源路由约定：
+- 列表页：`/resource/{skill|rules|mcp|tools}`
+- 上传页：`/resource/{type}/upload`
+- 详情页：`/resource/{type}/{id}`
+- 兼容路由：`/upload`、`/skill/:id` 会重定向到新路由
+
+上传行为：
+- `skill`：文件/文件夹上传，AI 审核 + 人工复核
+- `rules`：仅 `.md/.txt` 或粘贴 Markdown，AI 审核 + 人工复核
+- `mcp`：文章型发布（metadata），无 review，可填 GitHub 链接
+- `tools`：文章型发布（metadata/file），无 review，可附压缩包
 
 ## 上传与 GitHub 同步规则
 
@@ -97,6 +134,30 @@ GET    /api/skills/:id
 POST   /api/skills
 PUT    /api/skills/:id
 DELETE /api/skills/:id
+GET    /api/skills/:id/review-status
+POST   /api/skills/:id/review/retry
+POST   /api/skills/:id/human-review
+
+GET    /api/rules
+GET    /api/rules/:id
+POST   /api/rules
+PUT    /api/rules/:id
+DELETE /api/rules/:id
+GET    /api/rules/:id/review-status
+POST   /api/rules/:id/review/retry
+POST   /api/rules/:id/human-review
+
+GET    /api/mcps
+GET    /api/mcps/:id
+POST   /api/mcps
+PUT    /api/mcps/:id
+DELETE /api/mcps/:id
+
+GET    /api/tools
+GET    /api/tools/:id
+POST   /api/tools
+PUT    /api/tools/:id
+DELETE /api/tools/:id
 
 POST   /api/skills/:id/like
 POST   /api/skills/:id/favorite
@@ -106,7 +167,9 @@ GET    /api/me/favorites
 GET    /api/skills/:id/download
 POST   /api/skills/:id/download-hit
 GET    /api/skills/trending
-POST   /api/skills/:id/human-review
+
+POST   /api/content-assets/images
+GET    /api/content-assets/:filename
 
 POST   /api/ai/chat
 GET    /api/thumbnails/:filename
@@ -145,7 +208,7 @@ GET    /api/avatars/:filename
 - 前端字体（`Fira Sans` / `Fira Code` / `Didact Gothic`）已本地化到 `frontend/public/fonts`，运行时不依赖 Google Fonts 外链
 - 数据卷：
   - `db_data` -> `/app/data`
-  - `uploads` -> `/app/uploads`
+  - `uploads` -> `/app/uploads`（含正文图片资源 `content-assets`）
   - `thumbnails` -> `/app/thumbnails`
   - `avatars` -> `/app/avatars`
 

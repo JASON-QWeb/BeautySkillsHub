@@ -30,6 +30,9 @@ export interface Skill {
     human_review_feedback?: string
     human_reviewed_at?: string
     published?: boolean
+    github_path?: string
+    github_files?: string
+    github_url?: string
     created_at: string
     updated_at: string
 }
@@ -50,6 +53,11 @@ export interface UploadResponse {
 export interface SkillSummaryResponse {
     total: number
     yesterday_new: number
+}
+
+export interface SkillInstallConfigResponse {
+    github_repo: string
+    github_base_dir: string
 }
 
 export interface SkillReviewStatusResponse {

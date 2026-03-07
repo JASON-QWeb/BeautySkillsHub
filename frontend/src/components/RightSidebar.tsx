@@ -122,7 +122,7 @@ function RightSidebar({ resourceType = '' }: RightSidebarProps) {
                         <button
                             key={skill.id}
                             className="sidebar-hot-item"
-                            onClick={() => navigate(`/skill/${skill.id}`, { state: { resourceType: skill.resource_type || resourceType } })}
+                            onClick={() => navigate(`/resource/${skill.resource_type || resourceType || 'skill'}/${skill.id}`, { state: { resourceType: skill.resource_type || resourceType } })}
                         >
                             <span className="sidebar-rank">{String(idx + 1).padStart(2, '0')}</span>
                             <span className="sidebar-hot-name">{skill.name}</span>
@@ -146,7 +146,7 @@ function RightSidebar({ resourceType = '' }: RightSidebarProps) {
                         <button
                             key={skill.id}
                             className="sidebar-timeline-item"
-                            onClick={() => navigate(`/skill/${skill.id}`, { state: { resourceType: skill.resource_type || resourceType } })}
+                            onClick={() => navigate(`/resource/${skill.resource_type || resourceType || 'skill'}/${skill.id}`, { state: { resourceType: skill.resource_type || resourceType } })}
                         >
                             <span className="timeline-dot" />
                             <span className="timeline-card">

@@ -1,5 +1,5 @@
 import { API_BASE } from './client'
-import { Skill, SkillListResponse, SkillReviewStatusResponse, SkillSummaryResponse, UploadResponse } from './types'
+import { Skill, SkillInstallConfigResponse, SkillListResponse, SkillReviewStatusResponse, SkillSummaryResponse, UploadResponse } from './types'
 
 type SkillUpdatePayload = {
     name?: string
@@ -11,6 +11,14 @@ function getAuthHeaders(): Record<string, string> {
     const headers: Record<string, string> = {}
     if (token) headers.Authorization = `Bearer ${token}`
     return headers
+}
+
+function normalizeTagsForUpload(raw: string): string {
+    return raw
+        .split(/[\n\r,]+/)
+        .map(tag => tag.trim().toLowerCase())
+        .filter(Boolean)
+        .join(',')
 }
 
 /**
@@ -127,7 +135,20 @@ export async function fetchSkillSummary(resourceType = ''): Promise<SkillSummary
     return res.json()
 }
 
+export async function fetchSkillInstallConfig(): Promise<SkillInstallConfigResponse> {
+    const res = await fetch(`${API_BASE}/skills/install-config`, {
+        headers: getAuthHeaders(),
+    })
+    if (!res.ok) throw new Error('Failed to fetch install config')
+    return res.json()
+}
+
 export async function uploadSkill(formData: FormData): Promise<UploadResponse> {
+    const rawTags = formData.get('tags')
+    if (typeof rawTags === 'string') {
+        formData.set('tags', normalizeTagsForUpload(rawTags))
+    }
+
     // Determine upload endpoint based on resource_type in the form data
     const resourceType = formData.get('resource_type') as string || 'skill'
     const basePath = getResourcePath(resourceType)
@@ -166,7 +187,7 @@ export async function uploadSkill(formData: FormData): Promise<UploadResponse> {
 }
 
 export async function fetchSkillReviewStatus(id: number, resourceType = 'skill'): Promise<SkillReviewStatusResponse> {
-    if (resourceType && resourceType !== 'skill') {
+    if (resourceType && resourceType !== 'skill' && resourceType !== 'rules') {
         return {
             status: 'passed',
             phase: 'done',
@@ -190,8 +211,9 @@ export async function fetchSkillReviewStatus(id: number, resourceType = 'skill')
     return res.json()
 }
 
-export async function retrySkillReview(id: number): Promise<{ message: string; status: SkillReviewStatusResponse }> {
-    const res = await fetch(`${API_BASE}/skills/${id}/review/retry`, {
+export async function retrySkillReview(id: number, resourceType = 'skill'): Promise<{ message: string; status: SkillReviewStatusResponse }> {
+    const basePath = getResourcePath(resourceType)
+    const res = await fetch(`${API_BASE}${basePath}/${id}/review/retry`, {
         method: 'POST',
         headers: getAuthHeaders(),
     })
@@ -358,12 +380,48 @@ export async function updateSkill(id: number, payload: SkillUpdatePayload, resou
     return data.skill ?? data
 }
 
+export async function updateResourceFromUpload(id: number, formData: FormData, resourceType: 'mcp' | 'tools'): Promise<Skill> {
+    const rawTags = formData.get('tags')
+    if (typeof rawTags === 'string') {
+        formData.set('tags', normalizeTagsForUpload(rawTags))
+    }
+
+    const basePath = getResourcePath(resourceType)
+    const res = await fetch(`${API_BASE}${basePath}/${id}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: formData,
+    })
+    if (!res.ok) {
+        let message = `Update failed (HTTP ${res.status})`
+        const raw = (await res.text()).trim()
+        if (raw) {
+            try {
+                const parsed = JSON.parse(raw)
+                if (typeof parsed?.error === 'string' && parsed.error.trim()) {
+                    message = parsed.error
+                } else {
+                    message = raw
+                }
+            } catch {
+                message = raw
+            }
+        }
+        throw new Error(message)
+    }
+
+    const data = await res.json()
+    return data.skill ?? data
+}
+
 export async function submitHumanReview(
     id: number,
+    resourceType = 'skill',
     approved = true,
     feedback = '',
 ): Promise<Skill> {
-    const res = await fetch(`${API_BASE}/skills/${id}/human-review`, {
+    const basePath = getResourcePath(resourceType)
+    const res = await fetch(`${API_BASE}${basePath}/${id}/human-review`, {
         method: 'POST',
         headers: {
             ...getAuthHeaders(),

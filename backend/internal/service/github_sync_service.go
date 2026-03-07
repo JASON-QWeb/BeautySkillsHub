@@ -94,21 +94,39 @@ func (s *GitHubSyncService) SyncUploadedSkill(
 			Error:  fmt.Sprintf("检查 GitHub 路径失败: %v", err),
 		}
 	}
-	if len(existingPaths) > 0 {
+
+	sha, exists, err := s.client.GetFileSHA(ctx, targetPath)
+	if err != nil {
 		return GitHubSyncResult{
 			Status: GitHubSyncStatusFailed,
 			Path:   dirPath,
-			Error:  "GitHub 目录已存在，请修改技能名称后重试",
+			Error:  fmt.Sprintf("检查 GitHub 文件失败: %v", err),
 		}
 	}
 
 	commitMessage := fmt.Sprintf("Add skill: %s", strings.TrimSpace(skillName))
-	url, err := s.client.PutFile(ctx, targetPath, commitMessage, content, "")
+	commitSHA := ""
+	if exists {
+		commitMessage = fmt.Sprintf("Update skill: %s", strings.TrimSpace(skillName))
+		commitSHA = sha
+	}
+	url, err := s.client.PutFile(ctx, targetPath, commitMessage, content, commitSHA)
 	if err != nil {
 		return GitHubSyncResult{
 			Status: GitHubSyncStatusFailed,
 			Path:   dirPath,
 			Error:  fmt.Sprintf("上传到 GitHub 失败: %v", err),
+		}
+	}
+
+	stalePaths := collectStalePaths(existingPaths, map[string]struct{}{targetPath: {}})
+	if len(stalePaths) > 0 {
+		if err := s.DeleteSkillFilesFromGitHub(ctx, stalePaths); err != nil {
+			return GitHubSyncResult{
+				Status: GitHubSyncStatusFailed,
+				Path:   dirPath,
+				Error:  fmt.Sprintf("清理 GitHub 旧文件失败: %v", err),
+			}
 		}
 	}
 
@@ -250,17 +268,11 @@ func (s *GitHubSyncService) SyncUploadedFolder(
 			Error:  fmt.Sprintf("检查 GitHub 路径失败: %v", err),
 		}
 	}
-	if len(existingPaths) > 0 {
-		return GitHubSyncResult{
-			Status: GitHubSyncStatusFailed,
-			Path:   dirPath,
-			Error:  "GitHub 目录已存在，请修改技能名称后重试",
-		}
-	}
-
 	var lastURL string
 	var errors []string
 	uploadedPaths := make([]string, 0, len(files))
+	createdPaths := make([]string, 0, len(files))
+	desiredPaths := make(map[string]struct{}, len(files))
 
 	for _, fe := range files {
 		content, err := os.ReadFile(fe.LocalPath)
@@ -276,35 +288,53 @@ func (s *GitHubSyncService) SyncUploadedFolder(
 		}
 		targetPath := pathpkg.Join(dirPath, normalizedRel)
 
-		_, exists, err := s.client.GetFileSHA(ctx, targetPath)
+		sha, exists, err := s.client.GetFileSHA(ctx, targetPath)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("检查 GitHub 路径失败 %s: %v", targetPath, err))
 			continue
 		}
-		if exists {
-			errors = append(errors, fmt.Sprintf("路径已存在 %s，请修改技能名称后重试", targetPath))
-			continue
-		}
 
 		commitMessage := fmt.Sprintf("Add skill: %s - %s", strings.TrimSpace(skillName), fe.RelativePath)
-		url, err := s.client.PutFile(ctx, targetPath, commitMessage, content, "")
+		commitSHA := ""
+		if exists {
+			commitMessage = fmt.Sprintf("Update skill: %s - %s", strings.TrimSpace(skillName), fe.RelativePath)
+			commitSHA = sha
+		}
+		url, err := s.client.PutFile(ctx, targetPath, commitMessage, content, commitSHA)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("上传失败 %s: %v", fe.RelativePath, err))
 			continue
 		}
+		if !exists {
+			createdPaths = append(createdPaths, targetPath)
+		}
 		lastURL = url
 		uploadedPaths = append(uploadedPaths, targetPath)
+		desiredPaths[targetPath] = struct{}{}
 	}
 
 	if len(errors) > 0 {
-		rollbackErr := s.DeleteSkillFilesFromGitHub(ctx, uploadedPaths)
-		if rollbackErr != nil {
-			errors = append(errors, fmt.Sprintf("回滚失败: %v", rollbackErr))
+		if len(createdPaths) > 0 {
+			rollbackErr := s.DeleteSkillFilesFromGitHub(ctx, createdPaths)
+			if rollbackErr != nil {
+				errors = append(errors, fmt.Sprintf("回滚失败: %v", rollbackErr))
+			}
 		}
 		return GitHubSyncResult{
 			Status: GitHubSyncStatusFailed,
 			Path:   dirPath,
 			Error:  strings.Join(errors, "; "),
+		}
+	}
+
+	stalePaths := collectStalePaths(existingPaths, desiredPaths)
+	if len(stalePaths) > 0 {
+		if err := s.DeleteSkillFilesFromGitHub(ctx, stalePaths); err != nil {
+			return GitHubSyncResult{
+				Status: GitHubSyncStatusFailed,
+				Path:   dirPath,
+				Error:  fmt.Sprintf("清理 GitHub 旧文件失败: %v", err),
+			}
 		}
 	}
 
@@ -321,6 +351,20 @@ func appendTimestampSuffix(filePath string, ts time.Time) string {
 	ext := pathpkg.Ext(filePath)
 	prefix := strings.TrimSuffix(filePath, ext)
 	return fmt.Sprintf("%s_%s%s", prefix, ts.Format("20060102_150405"), ext)
+}
+
+func collectStalePaths(existingPaths []string, keep map[string]struct{}) []string {
+	if len(existingPaths) == 0 {
+		return nil
+	}
+	stale := make([]string, 0, len(existingPaths))
+	for _, filePath := range existingPaths {
+		if _, ok := keep[filePath]; ok {
+			continue
+		}
+		stale = append(stale, filePath)
+	}
+	return stale
 }
 
 func MarshalGitHubFiles(files []string) string {

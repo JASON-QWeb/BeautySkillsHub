@@ -1,13 +1,16 @@
 package handler
 
 import (
+	"net/http/httptest"
 	"mime/multipart"
 	"path/filepath"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestNormalizeTags(t *testing.T) {
-	input := "react, frontend, hooks, React,  ui , api, extra"
+	input := "React, FrontEND, hooks, React,  UI , API, extra"
 	got := normalizeTags(input)
 	want := "react,frontend,hooks,ui,api"
 	if got != want {
@@ -127,4 +130,54 @@ func TestValidateThumbnailHeader(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestIsRulesTextExtension(t *testing.T) {
+	if !isRulesTextExtension("rule.md") {
+		t.Fatal("expected .md to be allowed")
+	}
+	if !isRulesTextExtension("rule.TXT") {
+		t.Fatal("expected .txt to be allowed")
+	}
+	if isRulesTextExtension("rule.json") {
+		t.Fatal("expected .json to be rejected")
+	}
+}
+
+func TestResolveReviewedUploadResourceType(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("uses explicit form value", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest("POST", "/api/skills", nil)
+		c.Request.PostForm = map[string][]string{
+			"resource_type": {"rules"},
+		}
+		c.Params = gin.Params{{Key: "id", Value: "1"}}
+
+		if got := resolveReviewedUploadResourceType(c); got != "rules" {
+			t.Fatalf("expected rules, got %q", got)
+		}
+	})
+
+	t.Run("falls back to route", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest("POST", "/api/rules", nil)
+
+		if got := resolveReviewedUploadResourceType(c); got != "rules" {
+			t.Fatalf("expected rules, got %q", got)
+		}
+	})
+
+	t.Run("defaults to skill", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest("POST", "/api/skills", nil)
+
+		if got := resolveReviewedUploadResourceType(c); got != "skill" {
+			t.Fatalf("expected skill, got %q", got)
+		}
+	})
 }

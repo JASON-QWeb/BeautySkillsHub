@@ -375,7 +375,9 @@ func (h *SkillHandler) runAIReview(skillID uint) {
 		skill.AIApproved = true
 		skill.AIReviewStatus = model.AIReviewStatusPassed
 		skill.AIFeedback = fmt.Sprintf("AI 审核通过，已检查 %d 个关键文件", len(targets))
-		skill.AIDescription = "功能性: " + buildFunctionalReviewSummary(skill.Name, functionalSummaries)
+		functionalSummary := truncateReviewMessage(buildFunctionalReviewSummary(skill.Name, functionalSummaries), 72)
+		functionalContext := truncateReviewMessage(buildFunctionalContextLine(skill.Name, skill.Description, len(targets)), 72)
+		skill.AIDescription = fmt.Sprintf("功能概述: %s\n功能亮点: %s", functionalSummary, functionalContext)
 	} else {
 		skill.AIApproved = false
 		if skill.AIReviewAttempts >= maxAttempts {
@@ -384,7 +386,9 @@ func (h *SkillHandler) runAIReview(skillID uint) {
 			skill.AIReviewStatus = model.AIReviewStatusFailedRetry
 		}
 		skill.AIFeedback = fmt.Sprintf("发现 %d 个风险文件：%s", len(failedFiles), summarizeFileList(failedFiles, 3))
-		skill.AIDescription = fmt.Sprintf("功能性: %s（检测到 %d 个待修复文件）", buildFunctionalReviewSummary(skill.Name, functionalSummaries), len(failedFiles))
+		functionalSummary := truncateReviewMessage(buildFunctionalReviewSummary(skill.Name, functionalSummaries), 72)
+		improvement := truncateReviewMessage(fmt.Sprintf("当前检测到 %d 个待修复文件，建议修复后重新提交审核。", len(failedFiles)), 72)
+		skill.AIDescription = fmt.Sprintf("功能概述: %s\n改进建议: %s", functionalSummary, improvement)
 	}
 
 	_ = h.skillSvc.UpdateSkill(skill)
@@ -405,7 +409,7 @@ func (h *SkillHandler) finishReviewAsError(skill *model.Skill, maxAttempts int, 
 		skill.AIFeedback = "AI 审核失败，请稍后重试"
 	}
 	if strings.TrimSpace(skill.AIDescription) == "" {
-		skill.AIDescription = "功能性: 审核未完成，请重试。"
+		skill.AIDescription = "功能概述: 本次 AI 审核未完成。\n改进建议: 请稍后重试或重新上传后再次发起审核。"
 	}
 	_ = h.skillSvc.UpdateSkill(skill)
 }
@@ -476,6 +480,26 @@ func buildFunctionalReviewSummary(name string, summaries []string) string {
 		unique = unique[:3]
 	}
 	return "主要能力包括：" + strings.Join(unique, "、")
+}
+
+func buildFunctionalContextLine(name, description string, targetCount int) string {
+	trimmedDescription := strings.TrimSpace(description)
+	if trimmedDescription != "" {
+		sentences := strings.FieldsFunc(trimmedDescription, func(r rune) bool {
+			return r == '\n' || r == '。' || r == '！' || r == '!' || r == '?'
+		})
+		for _, sentence := range sentences {
+			trimmed := strings.TrimSpace(sentence)
+			if trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+
+	if strings.TrimSpace(name) != "" {
+		return fmt.Sprintf("聚焦 %s 的核心能力落地，覆盖 %d 个关键文件。", strings.TrimSpace(name), targetCount)
+	}
+	return fmt.Sprintf("本次审核覆盖 %d 个关键文件，可用于项目快速集成。", targetCount)
 }
 
 func newReviewProgress(targets []reviewTarget) reviewProgressDetails {
