@@ -117,7 +117,11 @@ func (h *ResourceHandler) GetReadme(c *gin.Context) {
 	sessionRoot := uploadSessionRoot(h.cfg.UploadDir, skill.FilePath)
 	if sessionRoot != "" {
 		if info, err := os.Stat(sessionRoot); err == nil && info.IsDir() {
-			candidates := []string{"README.md", "readme.md", "SKILL.md", "skill.md"}
+			candidates := []string{
+				"SKILL.md", "SKILLS.md", "README.md",
+				"skill.md", "skills.md", "readme.md",
+				"SKILL.MD", "SKILLS.MD", "README.MD",
+			}
 			for _, candidate := range candidates {
 				p := filepath.Join(sessionRoot, candidate)
 				if _, err := os.Stat(p); err == nil {
@@ -390,7 +394,7 @@ func (h *ResourceHandler) Upload(c *gin.Context) {
 		}
 		thumbnailURL = thumbFileName
 	} else {
-		thumbFile, err := service.GenerateThumbnail(name, name, h.cfg.ThumbnailDir)
+		thumbFile, err := service.GenerateThumbnail(name, thumbnailSubtitle(description, name), h.cfg.ThumbnailDir)
 		if err == nil {
 			thumbnailURL = thumbFile
 		}
@@ -574,6 +578,32 @@ func (h *ResourceHandler) Like(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"liked": liked, "likes_count": likesCount})
 }
 
+func (h *ResourceHandler) Unlike(c *gin.Context) {
+	userID, _, ok := currentUserIdentity(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "not authenticated"})
+		return
+	}
+
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid ID"})
+		return
+	}
+
+	if skill, err := h.skillSvc.GetSkill(uint(id)); err != nil || skill.ResourceType != h.resourceType {
+		c.JSON(http.StatusNotFound, gin.H{"error": "resource not found"})
+		return
+	}
+
+	liked, likesCount, err := h.skillSvc.UnlikeSkill(uint(id), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "unlike failed"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"liked": liked, "likes_count": likesCount})
+}
+
 func (h *ResourceHandler) AddFavorite(c *gin.Context) {
 	userID, _, ok := currentUserIdentity(c)
 	if !ok {
@@ -663,6 +693,7 @@ func RegisterResourceRoutes(
 	protected.PUT("/:id", h.Update)
 	protected.DELETE("/:id", h.Delete)
 	protected.POST("/:id/like", h.Like)
+	protected.DELETE("/:id/like", h.Unlike)
 	protected.POST("/:id/favorite", h.AddFavorite)
 	protected.DELETE("/:id/favorite", h.RemoveFavorite)
 }

@@ -215,6 +215,130 @@ export async function deleteSkill(id: number, resourceType = ''): Promise<{ mess
     return res.json()
 }
 
+export type DeleteProgressStage = 'db' | 'github'
+
+interface DeleteStreamDonePayload {
+    ok?: boolean
+    message?: string
+    github_error?: string
+    error?: string
+}
+
+export async function deleteSkillWithProgress(
+    id: number,
+    resourceType = '',
+    onProgress?: (stage: DeleteProgressStage) => void,
+): Promise<{ message: string; github_error?: string }> {
+    const basePath = resourceType ? getResourcePath(resourceType) : '/skills'
+    const res = await fetch(`${API_BASE}${basePath}/${id}/stream-delete`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+    })
+    if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'Delete failed')
+    }
+
+    const reader = res.body?.getReader()
+    if (!reader) {
+        throw new Error('无法读取删除进度')
+    }
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let eventType = ''
+    let dataLines: string[] = []
+
+    const reset = () => {
+        eventType = ''
+        dataLines = []
+    }
+
+    const parsePayload = (): Record<string, any> | null => {
+        if (dataLines.length === 0) return null
+        const raw = dataLines.join('\n').trim()
+        if (!raw) return null
+        try {
+            const parsed = JSON.parse(raw)
+            if (parsed && typeof parsed === 'object') {
+                return parsed
+            }
+        } catch {
+            return { message: raw }
+        }
+        return null
+    }
+
+    const dispatch = (): { done?: { message: string; github_error?: string } } | null => {
+        const payload = parsePayload()
+        if (!payload) {
+            reset()
+            return null
+        }
+
+        if (eventType === 'progress') {
+            const stage = payload.stage
+            if (stage === 'db' || stage === 'github') {
+                onProgress?.(stage)
+            }
+            reset()
+            return null
+        }
+
+        if (eventType === 'error') {
+            reset()
+            throw new Error(payload.error || payload.message || 'Delete failed')
+        }
+
+        if (eventType === 'done') {
+            reset()
+            const donePayload = payload as DeleteStreamDonePayload
+            if (donePayload.ok === false) {
+                throw new Error(donePayload.error || donePayload.message || 'Delete failed')
+            }
+            return {
+                done: {
+                    message: donePayload.message || 'Deleted',
+                    github_error: donePayload.github_error,
+                },
+            }
+        }
+
+        reset()
+        return null
+    }
+
+    while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+            const normalized = line.replace(/\r$/, '')
+            const trimmed = normalized.trim()
+            if (!trimmed) {
+                const result = dispatch()
+                if (result?.done) return result.done
+                continue
+            }
+            if (trimmed.startsWith('event:')) {
+                eventType = trimmed.slice(6).trim()
+                continue
+            }
+            if (trimmed.startsWith('data:')) {
+                dataLines.push(trimmed.slice(5).trim())
+            }
+        }
+    }
+
+    const final = dispatch()
+    if (final?.done) return final.done
+    throw new Error('删除进度流意外结束')
+}
+
 export async function updateSkill(id: number, payload: SkillUpdatePayload, resourceType = ''): Promise<Skill> {
     const basePath = resourceType ? getResourcePath(resourceType) : '/skills'
     const res = await fetch(`${API_BASE}${basePath}/${id}`, {
@@ -267,6 +391,21 @@ export async function likeSkill(id: number, resourceType = ''): Promise<{ liked:
     if (!res.ok) {
         const err = await res.json()
         throw new Error(err.error || 'Like failed')
+    }
+
+    return res.json()
+}
+
+export async function unlikeSkill(id: number, resourceType = ''): Promise<{ liked: boolean; likes_count: number }> {
+    const basePath = resourceType ? getResourcePath(resourceType) : '/skills'
+    const res = await fetch(`${API_BASE}${basePath}/${id}/like`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+    })
+
+    if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'Unlike failed')
     }
 
     return res.json()

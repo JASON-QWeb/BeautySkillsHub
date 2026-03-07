@@ -333,6 +333,84 @@
   cursor: not-allowed;
 }
 
+.thumb-crop-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(16, 20, 32, 0.65);
+  backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.thumb-crop-modal {
+  width: min(720px, 100%);
+  border-radius: 18px;
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+}
+
+.thumb-crop-modal-header h3 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: var(--text-primary);
+}
+
+.thumb-crop-modal-header p {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.thumb-crop-preview-wrap {
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #0f1a30;
+}
+
+.thumb-crop-preview {
+  width: 100%;
+  display: block;
+  aspect-ratio: 3 / 2;
+}
+
+.thumb-crop-controls {
+  display: grid;
+  gap: 10px;
+}
+
+.thumb-crop-control {
+  display: grid;
+  gap: 6px;
+}
+
+.thumb-crop-control span {
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  font-weight: 700;
+}
+
+.thumb-crop-control input[type="range"] {
+  width: 100%;
+}
+
+.thumb-crop-control em {
+  justify-self: end;
+  font-style: normal;
+  color: #2d57b6;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.thumb-crop-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .upload-review-card h2 {
   font-size: 1.8rem;
   margin-bottom: 2px;
@@ -663,5 +741,17 @@
 
   .upload-dropzones {
     grid-template-columns: 1fr;
+  }
+
+  .thumb-crop-modal {
+    padding: 14px;
+  }
+
+  .thumb-crop-actions {
+    flex-direction: column;
+  }
+
+  .thumb-crop-actions .btn {
+    width: 100%;
   }
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useI18n } from '../i18n/I18nProvider'
-import { Skill, favoriteSkill, likeSkill, unfavoriteSkill } from '../services/api'
+import { Skill, favoriteSkill, likeSkill, unfavoriteSkill, unlikeSkill } from '../services/api'
 
 interface Props {
     skill: Skill
@@ -55,6 +55,7 @@ function SkillCard({ skill, onFavoriteChange }: Props) {
     }, [skill.id, skill.likes_count, skill.user_liked, skill.favorited])
 
     const canFavorite = !!user && skill.ai_approved
+    const canLike = !!user && skill.ai_approved
 
     return (
         <article
@@ -118,45 +119,26 @@ function SkillCard({ skill, onFavoriteChange }: Props) {
                         <span className="metric metric-download">↧ {formatDownload(skill.downloads || 0)}</span>
                         <button
                             type="button"
-                            className={`metric metric-favorite-btn ${favorited ? 'favorited' : ''}`}
-                            disabled={favoriting || !canFavorite}
+                            className={`metric metric-favorite-btn ${userLiked ? 'favorited' : ''}`}
+                            disabled={liking || !canLike}
                             onClick={async e => {
                                 e.stopPropagation()
-                                if (!canFavorite || favoriting) return
-                                setFavoriting(true)
-                                try {
-                                    if (favorited) {
-                                        await unfavoriteSkill(skill.id, skill.resource_type)
-                                        setFavorited(false)
-                                        onFavoriteChange?.(skill.id, false)
-                                    } else {
-                                        await favoriteSkill(skill.id, skill.resource_type)
-                                        setFavorited(true)
-                                        onFavoriteChange?.(skill.id, true)
-                                    }
-                                } catch (err) {
-                                    console.error('Failed to favorite skill:', err)
-                                } finally {
-                                    setFavoriting(false)
-                                }
-                            }}
-                            aria-label={t('skillCard.favorite')}
-                        >
-                            {favorited ? '♥' : '♡'}
-                        </button>
-                        <button
-                            type="button"
-                            className={`metric metric-star-btn ${userLiked ? 'liked' : ''}`}
-                            disabled={liking || !user}
-                            onClick={async e => {
-                                e.stopPropagation()
-                                if (!user || liking) return
+                                if (!canLike || liking) return
+                                const prevLiked = userLiked
+                                const prevLikesCount = likesCount
+                                const nextLiked = !prevLiked
+                                setUserLiked(nextLiked)
+                                setLikesCount(prev => Math.max(0, prev + (nextLiked ? 1 : -1)))
                                 setLiking(true)
                                 try {
-                                    const result = await likeSkill(skill.id, skill.resource_type)
-                                    setLikesCount(result.likes_count || likesCount)
+                                    const result = nextLiked
+                                        ? await likeSkill(skill.id, skill.resource_type)
+                                        : await unlikeSkill(skill.id, skill.resource_type)
+                                    setLikesCount(result.likes_count ?? prevLikesCount)
                                     setUserLiked(!!result.liked)
                                 } catch (err) {
+                                    setUserLiked(prevLiked)
+                                    setLikesCount(prevLikesCount)
                                     console.error('Failed to like skill:', err)
                                 } finally {
                                     setLiking(false)
@@ -164,7 +146,37 @@ function SkillCard({ skill, onFavoriteChange }: Props) {
                             }}
                             aria-label={t('skillCard.like')}
                         >
-                            ★ {formatDownload(likesCount)}
+                            {userLiked ? '♥' : '♡'} {formatDownload(likesCount)}
+                        </button>
+                        <button
+                            type="button"
+                            className={`metric metric-star-btn ${favorited ? 'liked' : ''}`}
+                            disabled={favoriting || !canFavorite}
+                            onClick={async e => {
+                                e.stopPropagation()
+                                if (!canFavorite || favoriting) return
+                                const prevFavorited = favorited
+                                const nextFavorited = !prevFavorited
+                                setFavorited(nextFavorited)
+                                onFavoriteChange?.(skill.id, nextFavorited)
+                                setFavoriting(true)
+                                try {
+                                    if (prevFavorited) {
+                                        await unfavoriteSkill(skill.id, skill.resource_type)
+                                    } else {
+                                        await favoriteSkill(skill.id, skill.resource_type)
+                                    }
+                                } catch (err) {
+                                    setFavorited(prevFavorited)
+                                    onFavoriteChange?.(skill.id, prevFavorited)
+                                    console.error('Failed to favorite skill:', err)
+                                } finally {
+                                    setFavoriting(false)
+                                }
+                            }}
+                            aria-label={t('skillCard.favorite')}
+                        >
+                            {favorited ? '★' : '☆'}
                         </button>
                     </div>
                 </div>

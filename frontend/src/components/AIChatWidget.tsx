@@ -20,7 +20,7 @@ function AIChatWidget() {
     const [isLoading, setIsLoading] = useState(false)
     const [showSkinSelector, setShowSkinSelector] = useState(false)
     const [currentSkin, setCurrentSkin] = useState<SkinType>(() => {
-        return (localStorage.getItem('ai-skin') as SkinType) || 'default'
+        return (localStorage.getItem('ai-skin') as SkinType) || 'cat'
     })
     const messagesEndRef = useRef<HTMLDivElement>(null)
 

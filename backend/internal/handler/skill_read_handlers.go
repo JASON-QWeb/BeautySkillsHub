@@ -128,7 +128,11 @@ func (h *SkillHandler) GetSkillReadme(c *gin.Context) {
 
 	if sessionRoot != "" {
 		if info, err := os.Stat(sessionRoot); err == nil && info.IsDir() {
-			candidates := []string{"SKILL.md", "README.md", "skill.md", "readme.md"}
+			candidates := []string{
+				"SKILL.md", "SKILLS.md", "README.md",
+				"skill.md", "skills.md", "readme.md",
+				"SKILL.MD", "SKILLS.MD", "README.MD",
+			}
 			for _, candidate := range candidates {
 				candidatePath := filepath.Join(sessionRoot, candidate)
 				if _, err := os.Stat(candidatePath); err == nil {

@@ -201,7 +201,7 @@ func (h *SkillHandler) UploadSkill(c *gin.Context) {
 		}
 		thumbnailURL = thumbFileName
 	} else {
-		thumbFile, err := service.GenerateThumbnail(name, name, h.cfg.ThumbnailDir)
+		thumbFile, err := service.GenerateThumbnail(name, thumbnailSubtitle(description, name), h.cfg.ThumbnailDir)
 		if err == nil {
 			thumbnailURL = thumbFile
 		}
@@ -284,6 +284,13 @@ func normalizeTags(raw string) string {
 	return strings.Join(result, ",")
 }
 
+func thumbnailSubtitle(description, fallback string) string {
+	if trimmed := strings.TrimSpace(description); trimmed != "" {
+		return trimmed
+	}
+	return strings.TrimSpace(fallback)
+}
+
 func sanitizeLocalFilename(name string) string {
 	base := filepath.Base(strings.ReplaceAll(strings.TrimSpace(name), "\\", "/"))
 	if base == "" || base == "." || base == "/" {
@@ -356,7 +363,20 @@ func uploadSessionRoot(base, filePath string) string {
 	if len(parts) == 0 || parts[0] == "" || parts[0] == "." || parts[0] == ".." {
 		return ""
 	}
+	if len(parts) == 1 {
+		return filepath.Join(baseAbs, parts[0])
+	}
+	if isUploadSessionDirName(parts[0]) {
+		return filepath.Join(baseAbs, parts[0])
+	}
+	if isUploadSessionDirName(parts[1]) {
+		return filepath.Join(baseAbs, parts[0], parts[1])
+	}
 	return filepath.Join(baseAbs, parts[0])
+}
+
+func isUploadSessionDirName(segment string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(segment)), "upload-")
 }
 
 func validateThumbnailHeader(header *multipart.FileHeader) (string, error) {

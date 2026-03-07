@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -14,6 +16,8 @@ import (
 )
 
 const defaultAIHTTPTimeout = 120 * time.Second
+const maxSendRetryAttempts = 3
+const sendRetryBaseDelay = 300 * time.Millisecond
 
 // Service handles all AI-related operations via OpenAI-compatible API.
 type Service struct {
@@ -79,16 +83,9 @@ func (s *Service) callChat(ctx context.Context, messages []ChatMessage) (string,
 	ctx, cancel := context.WithTimeout(ctx, s.httpClient.Timeout)
 	defer cancel()
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", s.cfg.OpenAIBaseURL+"/chat/completions", bytes.NewReader(body))
+	resp, err := s.sendChatRequest(ctx, body)
 	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+s.cfg.OpenAIKey)
-
-	resp, err := s.httpClient.Do(httpReq)
-	if err != nil {
-		return "", fmt.Errorf("send request: %w", err)
+		return "", err
 	}
 	defer resp.Body.Close()
 
@@ -128,16 +125,9 @@ func (s *Service) callStream(ctx context.Context, messages []ChatMessage, writer
 	ctx, cancel := context.WithTimeout(ctx, s.httpClient.Timeout)
 	defer cancel()
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", s.cfg.OpenAIBaseURL+"/chat/completions", bytes.NewReader(body))
+	resp, err := s.sendChatRequest(ctx, body)
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+s.cfg.OpenAIKey)
-
-	resp, err := s.httpClient.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("send request: %w", err)
+		return err
 	}
 	defer resp.Body.Close()
 
@@ -199,6 +189,74 @@ func cleanJSON(s string) string {
 	s = strings.TrimPrefix(s, "```")
 	s = strings.TrimSuffix(s, "```")
 	return strings.TrimSpace(s)
+}
+
+func (s *Service) sendChatRequest(ctx context.Context, body []byte) (*http.Response, error) {
+	var lastErr error
+	url := s.cfg.OpenAIBaseURL + "/chat/completions"
+
+	for attempt := 1; attempt <= maxSendRetryAttempts; attempt++ {
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("create request: %w", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+s.cfg.OpenAIKey)
+
+		resp, err := s.httpClient.Do(httpReq)
+		if err == nil {
+			return resp, nil
+		}
+
+		lastErr = err
+		if !isRetriableSendError(err) || attempt == maxSendRetryAttempts {
+			break
+		}
+
+		wait := time.Duration(attempt) * sendRetryBaseDelay
+		if !sleepWithContext(ctx, wait) {
+			return nil, fmt.Errorf("send request: %w", ctx.Err())
+		}
+	}
+
+	return nil, fmt.Errorf("send request: %w", lastErr)
+}
+
+func isRetriableSendError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "eof") ||
+		strings.Contains(text, "connection reset by peer") ||
+		strings.Contains(text, "broken pipe") ||
+		strings.Contains(text, "server closed idle connection") ||
+		strings.Contains(text, "client connection lost") ||
+		strings.Contains(text, "use of closed network connection")
+}
+
+func sleepWithContext(ctx context.Context, wait time.Duration) bool {
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 func truncate(s string, maxLen int) string {

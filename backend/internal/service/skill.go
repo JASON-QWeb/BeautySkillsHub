@@ -137,6 +137,42 @@ func (s *SkillService) LikeSkill(skillID, userID uint) (bool, int, error) {
 	return true, count, nil
 }
 
+// UnlikeSkill removes user's like if present and returns the current likes count.
+func (s *SkillService) UnlikeSkill(skillID, userID uint) (bool, int, error) {
+	if skillID == 0 || userID == 0 {
+		return false, 0, errors.New("invalid skill id or user id")
+	}
+
+	tx := s.db.Begin()
+	if tx.Error != nil {
+		return false, 0, tx.Error
+	}
+
+	deleteResult := tx.Where("skill_id = ? AND user_id = ?", skillID, userID).Delete(&model.SkillLike{})
+	if deleteResult.Error != nil {
+		tx.Rollback()
+		return false, 0, deleteResult.Error
+	}
+
+	if deleteResult.RowsAffected > 0 {
+		if err := tx.Model(&model.Skill{}).Where("id = ?", skillID).
+			UpdateColumn("likes_count", gorm.Expr("CASE WHEN likes_count > 0 THEN likes_count - 1 ELSE 0 END")).Error; err != nil {
+			tx.Rollback()
+			return false, 0, err
+		}
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		return false, 0, err
+	}
+
+	count, err := s.GetLikesCount(skillID)
+	if err != nil {
+		return false, 0, err
+	}
+	return false, count, nil
+}
+
 func (s *SkillService) GetLikesCount(skillID uint) (int, error) {
 	var skill model.Skill
 	if err := s.db.Select("likes_count").First(&skill, skillID).Error; err != nil {

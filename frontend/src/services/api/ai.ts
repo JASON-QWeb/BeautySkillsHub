@@ -27,6 +27,54 @@ export async function chatWithAI(
 
         const decoder = new TextDecoder()
         let buffer = ''
+        let eventType = 'message'
+        let dataLines: string[] = []
+
+        const resetEvent = () => {
+            eventType = 'message'
+            dataLines = []
+        }
+
+        const parsePayload = (raw: string) => {
+            const trimmed = raw.trim()
+            if (!trimmed) return ''
+            try {
+                const parsed = JSON.parse(trimmed)
+                if (typeof parsed === 'string') return parsed
+                return JSON.stringify(parsed)
+            } catch {
+                return trimmed
+            }
+        }
+
+        const dispatchEvent = (): 'continue' | 'done' | 'error' => {
+            if (dataLines.length === 0) {
+                resetEvent()
+                return 'continue'
+            }
+
+            const payload = parsePayload(dataLines.join('\n'))
+            if (!payload) {
+                resetEvent()
+                return 'continue'
+            }
+
+            if (eventType === 'error') {
+                resetEvent()
+                onError(payload)
+                return 'error'
+            }
+
+            if (eventType === 'done' || payload === '[DONE]') {
+                resetEvent()
+                onDone()
+                return 'done'
+            }
+
+            onChunk(payload)
+            resetEvent()
+            return 'continue'
+        }
 
         while (true) {
             const { done, value } = await reader.read()
@@ -37,28 +85,29 @@ export async function chatWithAI(
             buffer = lines.pop() || ''
 
             for (const line of lines) {
-                const trimmed = line.trim()
-                if (!trimmed) continue
+                const normalized = line.replace(/\r$/, '')
+                const trimmed = normalized.trim()
+                if (!trimmed) {
+                    const status = dispatchEvent()
+                    if (status !== 'continue') return
+                    continue
+                }
 
+                if (trimmed.startsWith(':')) continue
+                if (trimmed.startsWith('event:')) {
+                    eventType = trimmed.slice(6).trim() || 'message'
+                    continue
+                }
                 if (trimmed.startsWith('data:')) {
-                    const data = trimmed.slice(5).trim()
-                    if (!data) continue
-
-                    if (data === '[DONE]') {
-                        onDone()
-                        return
-                    }
-
-                    try {
-                        const parsed = JSON.parse(data)
-                        if (typeof parsed === 'string') {
-                            onChunk(parsed)
-                        }
-                    } catch {
-                        onChunk(data)
-                    }
+                    dataLines.push(trimmed.slice(5).trim())
+                    continue
                 }
             }
+        }
+
+        if (dataLines.length > 0) {
+            const status = dispatchEvent()
+            if (status !== 'continue') return
         }
 
         onDone()

@@ -21,6 +21,15 @@ func TestNormalizeTags_Empty(t *testing.T) {
 	}
 }
 
+func TestThumbnailSubtitle(t *testing.T) {
+	if got := thumbnailSubtitle("  concise description ", "fallback"); got != "concise description" {
+		t.Fatalf("expected description to win, got %q", got)
+	}
+	if got := thumbnailSubtitle("   ", "  fallback name  "); got != "fallback name" {
+		t.Fatalf("expected fallback when description is empty, got %q", got)
+	}
+}
+
 func TestSanitizeLocalFilename(t *testing.T) {
 	if got := sanitizeLocalFilename("../../evil.sh"); got != "evil.sh" {
 		t.Fatalf("expected cleaned filename, got %q", got)
@@ -48,6 +57,11 @@ func TestUploadSessionRoot(t *testing.T) {
 	nestedFile := filepath.Join(base, "skill-upload-123", "src", "main.md")
 	if got := uploadSessionRoot(base, nestedFile); got != filepath.Join(base, "skill-upload-123") {
 		t.Fatalf("unexpected session root for nested file: %q", got)
+	}
+
+	typeSubdirFile := filepath.Join(base, "skills", "skill-upload-456", "src", "SKILLS.md")
+	if got := uploadSessionRoot(base, typeSubdirFile); got != filepath.Join(base, "skills", "skill-upload-456") {
+		t.Fatalf("unexpected session root for type subdir file: %q", got)
 	}
 
 	plainFile := filepath.Join(base, "legacy.md")

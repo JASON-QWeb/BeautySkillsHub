@@ -277,6 +277,7 @@ func (h *SkillHandler) runAIReview(skillID uint) {
 	}
 
 	failedFiles := make([]string, 0)
+	functionalSummaries := make([]string, 0, len(targets))
 	for i := range targets {
 		target := targets[i]
 		progress.CurrentFile = target.Path
@@ -322,6 +323,9 @@ func (h *SkillHandler) runAIReview(skillID uint) {
 			skill.AIReviewDetails = encodeReviewProgress(progress)
 			h.finishReviewAsError(skill, maxAttempts, fmt.Sprintf("AI 审核失败（%s）: %v", target.Path, aiErr))
 			return
+		}
+		if summary := extractFunctionalSummary(reviewResult.FuncSummary, reviewResult.AIDescription, reviewResult.Feedback); summary != "" {
+			functionalSummaries = append(functionalSummaries, summary)
 		}
 
 		filePassed := true
@@ -371,7 +375,7 @@ func (h *SkillHandler) runAIReview(skillID uint) {
 		skill.AIApproved = true
 		skill.AIReviewStatus = model.AIReviewStatusPassed
 		skill.AIFeedback = fmt.Sprintf("AI 审核通过，已检查 %d 个关键文件", len(targets))
-		skill.AIDescription = fmt.Sprintf("安全性: 未发现明显风险。\n功能性: 已完成 %d 个文件审查。", len(targets))
+		skill.AIDescription = "功能性: " + buildFunctionalReviewSummary(skill.Name, functionalSummaries)
 	} else {
 		skill.AIApproved = false
 		if skill.AIReviewAttempts >= maxAttempts {
@@ -380,7 +384,7 @@ func (h *SkillHandler) runAIReview(skillID uint) {
 			skill.AIReviewStatus = model.AIReviewStatusFailedRetry
 		}
 		skill.AIFeedback = fmt.Sprintf("发现 %d 个风险文件：%s", len(failedFiles), summarizeFileList(failedFiles, 3))
-		skill.AIDescription = fmt.Sprintf("安全性: 检测到 %d 个风险文件。\n功能性: 请修复后重新上传。", len(failedFiles))
+		skill.AIDescription = fmt.Sprintf("功能性: %s（检测到 %d 个待修复文件）", buildFunctionalReviewSummary(skill.Name, functionalSummaries), len(failedFiles))
 	}
 
 	_ = h.skillSvc.UpdateSkill(skill)
@@ -401,9 +405,77 @@ func (h *SkillHandler) finishReviewAsError(skill *model.Skill, maxAttempts int, 
 		skill.AIFeedback = "AI 审核失败，请稍后重试"
 	}
 	if strings.TrimSpace(skill.AIDescription) == "" {
-		skill.AIDescription = "安全性: 审核未完成。\n功能性: 请重试审核。"
+		skill.AIDescription = "功能性: 审核未完成，请重试。"
 	}
 	_ = h.skillSvc.UpdateSkill(skill)
+}
+
+func extractFunctionalSummary(funcSummary, aiDescription, feedback string) string {
+	if trimmed := strings.TrimSpace(funcSummary); trimmed != "" {
+		return trimmed
+	}
+
+	lines := strings.Split(aiDescription, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "功能性") || strings.HasPrefix(strings.ToLower(trimmed), "function") {
+			if idx := strings.IndexAny(trimmed, ":："); idx >= 0 && idx+1 < len(trimmed) {
+				return strings.TrimSpace(trimmed[idx+1:])
+			}
+			return strings.TrimSpace(trimmed)
+		}
+	}
+
+	feedbackLine := strings.TrimSpace(feedback)
+	if feedbackLine == "" {
+		return ""
+	}
+	sentences := strings.FieldsFunc(feedbackLine, func(r rune) bool {
+		return r == '。' || r == '！' || r == '!' || r == '\n'
+	})
+	for _, sentence := range sentences {
+		if trimmed := strings.TrimSpace(sentence); trimmed != "" {
+			return truncateReviewMessage(trimmed, 60)
+		}
+	}
+	return ""
+}
+
+func buildFunctionalReviewSummary(name string, summaries []string) string {
+	seen := make(map[string]struct{}, len(summaries))
+	unique := make([]string, 0, len(summaries))
+	for _, item := range summaries {
+		normalized := strings.TrimSpace(item)
+		if normalized == "" {
+			continue
+		}
+		if idx := strings.IndexAny(normalized, "\n。"); idx > 0 {
+			normalized = strings.TrimSpace(normalized[:idx])
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		unique = append(unique, normalized)
+	}
+
+	if len(unique) == 0 {
+		trimmedName := strings.TrimSpace(name)
+		if trimmedName == "" {
+			return "该资源提供自动化能力"
+		}
+		return fmt.Sprintf("该资源围绕 %s 提供自动化能力", trimmedName)
+	}
+	if len(unique) == 1 {
+		return unique[0]
+	}
+	if len(unique) > 3 {
+		unique = unique[:3]
+	}
+	return "主要能力包括：" + strings.Join(unique, "、")
 }
 
 func newReviewProgress(targets []reviewTarget) reviewProgressDetails {

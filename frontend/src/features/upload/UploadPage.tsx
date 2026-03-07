@@ -6,8 +6,162 @@ import { RESOURCE_TYPES, Skill, SkillReviewStatusResponse, fetchSkillReviewStatu
 import { useDialog } from '../../contexts/DialogContext'
 
 const MAX_TAGS = 5
+const THUMB_TARGET_WIDTH = 1200
+const THUMB_TARGET_HEIGHT = 800
+const THUMB_TARGET_RATIO = THUMB_TARGET_WIDTH / THUMB_TARGET_HEIGHT
+const THUMB_MIN_WIDTH = 600
+const THUMB_MIN_HEIGHT = 400
+const THUMB_MAX_SIZE_BYTES = 5 * 1024 * 1024
+const THUMB_RATIO_TOLERANCE = 0.03
+const THUMB_PREVIEW_WIDTH = 540
+const THUMB_PREVIEW_HEIGHT = Math.round((THUMB_PREVIEW_WIDTH * THUMB_TARGET_HEIGHT) / THUMB_TARGET_WIDTH)
 
 type ReviewStatus = 'idle' | 'pending' | 'approved' | 'rejected'
+
+interface ImageMeta {
+    width: number
+    height: number
+}
+
+interface ThumbnailCropState {
+    file: File
+    previewUrl: string
+    meta: ImageMeta
+    zoom: number
+    centerX: number
+    centerY: number
+}
+
+interface CropArea {
+    sx: number
+    sy: number
+    sw: number
+    sh: number
+}
+
+function clamp(value: number, min: number, max: number) {
+    return Math.min(max, Math.max(min, value))
+}
+
+function isThumbnailSizeReasonable(meta: ImageMeta) {
+    const ratio = meta.width / meta.height
+    const ratioDiff = Math.abs(ratio - THUMB_TARGET_RATIO)
+    return ratioDiff <= THUMB_RATIO_TOLERANCE && meta.width >= THUMB_MIN_WIDTH && meta.height >= THUMB_MIN_HEIGHT
+}
+
+function computeCropArea(meta: ImageMeta, zoom: number, centerX: number, centerY: number): CropArea {
+    const safeZoom = Math.max(1, zoom)
+    let baseWidth = meta.width
+    let baseHeight = meta.height
+    const sourceRatio = meta.width / meta.height
+    if (sourceRatio > THUMB_TARGET_RATIO) {
+        baseWidth = meta.height * THUMB_TARGET_RATIO
+    } else {
+        baseHeight = meta.width / THUMB_TARGET_RATIO
+    }
+
+    const cropWidth = baseWidth / safeZoom
+    const cropHeight = baseHeight / safeZoom
+    const centerPxX = clamp(centerX * meta.width, cropWidth / 2, meta.width-cropWidth/2)
+    const centerPxY = clamp(centerY * meta.height, cropHeight / 2, meta.height-cropHeight/2)
+
+    return {
+        sx: centerPxX - cropWidth / 2,
+        sy: centerPxY - cropHeight / 2,
+        sw: cropWidth,
+        sh: cropHeight,
+    }
+}
+
+function loadImageObject(url: string) {
+    return new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image()
+        img.onload = () => resolve(img)
+        img.onerror = () => reject(new Error('load image failed'))
+        img.src = url
+    })
+}
+
+function readImageMeta(file: File) {
+    return new Promise<ImageMeta>((resolve, reject) => {
+        const url = URL.createObjectURL(file)
+        const img = new Image()
+        img.onload = () => {
+            resolve({ width: img.naturalWidth, height: img.naturalHeight })
+            URL.revokeObjectURL(url)
+        }
+        img.onerror = () => {
+            reject(new Error('invalid image'))
+            URL.revokeObjectURL(url)
+        }
+        img.src = url
+    })
+}
+
+function buildThumbnailFileName(name: string) {
+    const base = name.replace(/\.[^.]+$/, '').trim() || 'thumbnail'
+    const safeBase = base.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'thumbnail'
+    return `${safeBase}_thumb.jpg`
+}
+
+async function makeCroppedThumbnail(cropState: ThumbnailCropState) {
+    const image = await loadImageObject(cropState.previewUrl)
+    const area = computeCropArea(cropState.meta, cropState.zoom, cropState.centerX, cropState.centerY)
+    const canvas = document.createElement('canvas')
+    canvas.width = THUMB_TARGET_WIDTH
+    canvas.height = THUMB_TARGET_HEIGHT
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('canvas unavailable')
+
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(image, area.sx, area.sy, area.sw, area.sh, 0, 0, THUMB_TARGET_WIDTH, THUMB_TARGET_HEIGHT)
+
+    const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+            value => {
+                if (!value) {
+                    reject(new Error('thumbnail blob generation failed'))
+                    return
+                }
+                resolve(value)
+            },
+            'image/jpeg',
+            0.92,
+        )
+    })
+
+    return new File([blob], buildThumbnailFileName(cropState.file.name), {
+        type: 'image/jpeg',
+        lastModified: Date.now(),
+    })
+}
+
+function drawCropPreview(canvas: HTMLCanvasElement, image: HTMLImageElement, cropState: ThumbnailCropState) {
+    const area = computeCropArea(cropState.meta, cropState.zoom, cropState.centerX, cropState.centerY)
+    canvas.width = THUMB_PREVIEW_WIDTH
+    canvas.height = THUMB_PREVIEW_HEIGHT
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
+    ctx.drawImage(image, area.sx, area.sy, area.sw, area.sh, 0, 0, canvas.width, canvas.height)
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(canvas.width / 3, 0)
+    ctx.lineTo(canvas.width / 3, canvas.height)
+    ctx.moveTo((canvas.width * 2) / 3, 0)
+    ctx.lineTo((canvas.width * 2) / 3, canvas.height)
+    ctx.moveTo(0, canvas.height / 3)
+    ctx.lineTo(canvas.width, canvas.height / 3)
+    ctx.moveTo(0, (canvas.height * 2) / 3)
+    ctx.lineTo(canvas.width, (canvas.height * 2) / 3)
+    ctx.stroke()
+}
 
 function UploadPage() {
     const [searchParams] = useSearchParams()
@@ -26,7 +180,9 @@ function UploadPage() {
     const [file, setFile] = useState<File | null>(null)
     const [folderFiles, setFolderFiles] = useState<File[]>([])
     const [thumbnail, setThumbnail] = useState<File | null>(null)
+    const [thumbnailCrop, setThumbnailCrop] = useState<ThumbnailCropState | null>(null)
     const [thumbnailPreviewUrl, setThumbnailPreviewUrl] = useState('')
+    const [cropApplying, setCropApplying] = useState(false)
 
     const [step, setStep] = useState(1)
     const [uploading, setUploading] = useState(false)
@@ -38,6 +194,8 @@ function UploadPage() {
     const fileInputRef = useRef<HTMLInputElement>(null)
     const folderInputRef = useRef<HTMLInputElement>(null)
     const thumbInputRef = useRef<HTMLInputElement>(null)
+    const cropPreviewRef = useRef<HTMLCanvasElement>(null)
+    const cropImageRef = useRef<HTMLImageElement | null>(null)
     const reviewPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
     useEffect(() => {
@@ -50,6 +208,35 @@ function UploadPage() {
         setThumbnailPreviewUrl(url)
         return () => URL.revokeObjectURL(url)
     }, [thumbnail])
+
+    useEffect(() => {
+        if (!thumbnailCrop) {
+            cropImageRef.current = null
+            return
+        }
+
+        let cancelled = false
+        void loadImageObject(thumbnailCrop.previewUrl)
+            .then(img => {
+                if (cancelled) return
+                cropImageRef.current = img
+                if (cropPreviewRef.current) {
+                    drawCropPreview(cropPreviewRef.current, img, thumbnailCrop)
+                }
+            })
+            .catch(() => {
+                cropImageRef.current = null
+            })
+
+        return () => {
+            cancelled = true
+        }
+    }, [thumbnailCrop?.previewUrl])
+
+    useEffect(() => {
+        if (!thumbnailCrop || !cropImageRef.current || !cropPreviewRef.current) return
+        drawCropPreview(cropPreviewRef.current, cropImageRef.current, thumbnailCrop)
+    }, [thumbnailCrop?.zoom, thumbnailCrop?.centerX, thumbnailCrop?.centerY, thumbnailCrop?.meta.width, thumbnailCrop?.meta.height])
 
     const selectedFileHint = useMemo(() => {
         if (uploadMode === 'file') return file?.name || ''
@@ -65,6 +252,81 @@ function UploadPage() {
     }, [uploadedSkill, name, t])
 
     const compactThumb = uploadedSkill?.thumbnail_url || thumbnailPreviewUrl
+
+    const closeThumbnailCropModal = (clearSelection: boolean) => {
+        setThumbnailCrop(prev => {
+            if (prev) {
+                URL.revokeObjectURL(prev.previewUrl)
+            }
+            return null
+        })
+        setCropApplying(false)
+        cropImageRef.current = null
+        if (clearSelection) {
+            setThumbnail(null)
+            if (thumbInputRef.current) {
+                thumbInputRef.current.value = ''
+            }
+        }
+    }
+
+    const handleThumbnailSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const selected = e.target.files?.[0] || null
+        if (!selected) {
+            setThumbnail(null)
+            return
+        }
+        if (selected.size > THUMB_MAX_SIZE_BYTES) {
+            await showAlert(t('upload.thumbnailTooLarge'))
+            e.target.value = ''
+            return
+        }
+
+        try {
+            const meta = await readImageMeta(selected)
+            if (isThumbnailSizeReasonable(meta)) {
+                setThumbnail(selected)
+                return
+            }
+
+            const previewUrl = URL.createObjectURL(selected)
+            setThumbnail(null)
+            setThumbnailCrop(prev => {
+                if (prev) {
+                    URL.revokeObjectURL(prev.previewUrl)
+                }
+                return {
+                    file: selected,
+                    previewUrl,
+                    meta,
+                    zoom: 1,
+                    centerX: 0.5,
+                    centerY: 0.5,
+                }
+            })
+        } catch {
+            await showAlert(t('upload.thumbnailInvalid'))
+            setThumbnail(null)
+            e.target.value = ''
+        }
+    }
+
+    const handleApplyThumbnailCrop = async () => {
+        if (!thumbnailCrop || cropApplying) return
+        setCropApplying(true)
+        try {
+            const cropped = await makeCroppedThumbnail(thumbnailCrop)
+            setThumbnail(cropped)
+            closeThumbnailCropModal(false)
+        } catch {
+            setCropApplying(false)
+            await showAlert(t('upload.thumbnailCropFailed'))
+        }
+    }
+
+    const updateThumbnailCrop = (changes: Partial<ThumbnailCropState>) => {
+        setThumbnailCrop(prev => (prev ? { ...prev, ...changes } : prev))
+    }
 
     const handleFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files || [])
@@ -121,6 +383,24 @@ function UploadPage() {
         return '⌛'
     }
 
+    const mapAIReviewStatusLabel = (status: SkillReviewStatusResponse['status']) => {
+        if (status === 'queued') return t('review.aiStatusQueued')
+        if (status === 'running') return t('review.aiStatusRunning')
+        if (status === 'passed') return t('review.aiStatusPassed')
+        if (status === 'failed_retryable') return t('review.aiStatusFailedRetryable')
+        if (status === 'failed_terminal') return t('review.aiStatusFailedTerminal')
+        return t('review.unknown')
+    }
+
+    const mapAIReviewPhaseLabel = (phase: SkillReviewStatusResponse['phase']) => {
+        if (phase === 'queued') return t('review.aiPhaseQueued')
+        if (phase === 'security') return t('review.aiPhaseSecurity')
+        if (phase === 'functional') return t('review.aiPhaseFunctional')
+        if (phase === 'finalizing') return t('review.aiPhaseFinalizing')
+        if (phase === 'done') return t('review.aiPhaseDone')
+        return t('review.unknown')
+    }
+
     const applyReviewStatus = (status: SkillReviewStatusResponse) => {
         setReviewMeta(status)
         if (status.status === 'queued' || status.status === 'running') {
@@ -164,6 +444,7 @@ function UploadPage() {
 
     const resetState = () => {
         clearReviewPolling()
+        closeThumbnailCropModal(true)
         setStep(1)
         setUploading(false)
         setReviewStatus('idle')
@@ -177,6 +458,15 @@ function UploadPage() {
         setFile(null)
         setFolderFiles([])
         setThumbnail(null)
+        if (fileInputRef.current) {
+            fileInputRef.current.value = ''
+        }
+        if (folderInputRef.current) {
+            folderInputRef.current.value = ''
+        }
+        if (thumbInputRef.current) {
+            thumbInputRef.current.value = ''
+        }
     }
 
     useEffect(() => {
@@ -269,6 +559,24 @@ function UploadPage() {
             setFeedback(err instanceof Error ? err.message : '重新审核失败')
         }
     }
+
+    const aiProgressTotal = reviewMeta?.progress?.total_files || 0
+    const aiProgressPassed = reviewMeta?.progress?.files.filter(item => item.status === 'passed').length || 0
+    const aiProgressFailed = reviewMeta?.progress?.files.filter(item => item.status === 'failed').length || 0
+
+    const reviewSecuritySummary = aiProgressFailed > 0
+        ? t('review.securitySummaryRisk', { count: aiProgressFailed })
+        : t('review.securitySummarySafe')
+
+    const reviewFunctionalSummary = reviewStatus === 'approved'
+        ? (aiProgressTotal > 0
+            ? t('review.functionalSummaryPassWithFiles', { passed: aiProgressPassed, total: aiProgressTotal })
+            : t('review.functionalSummaryPass'))
+        : (aiProgressFailed > 0
+            ? t('review.functionalSummaryNeedsFix', { count: aiProgressFailed })
+            : (feedback || t('upload.reviewRejectedFallback')))
+
+    const showExpandedAIReview = step >= 2 && (resourceType === 'skill' || step === 2)
 
     return (
         <div className="upload-page page-enter">
@@ -408,7 +716,9 @@ function UploadPage() {
                                         ref={thumbInputRef}
                                         type="file"
                                         accept="image/*"
-                                        onChange={e => setThumbnail(e.target.files?.[0] || null)}
+                                        onChange={e => {
+                                            void handleThumbnailSelect(e)
+                                        }}
                                         disabled={uploading}
                                     />
                                 </button>
@@ -488,13 +798,13 @@ function UploadPage() {
                     )}
                 </section>
 
-                <section className={`upload-stage-card ${step === 2 ? 'expanded' : step > 2 ? 'compact' : 'placeholder'}`}>
+                <section className={`upload-stage-card ${step < 2 ? 'placeholder' : showExpandedAIReview ? 'expanded' : 'compact'}`}>
                     {step < 2 ? (
                         <div className="upload-placeholder-card glass-card">
                             <strong>{t('upload.waitForStep')}</strong>
                             <p>{t('upload.stepAi')}</p>
                         </div>
-                    ) : step === 2 ? (
+                    ) : showExpandedAIReview ? (
                         <div className="upload-review-card glass-card">
                             <h2>{t('upload.aiReviewPanelTitle')}</h2>
 
@@ -517,6 +827,46 @@ function UploadPage() {
                                     <strong>{t('upload.reviewRejectedTitle')}</strong>
                                     <p>{feedback || t('upload.reviewRejectedFallback')}</p>
                                 </div>
+                            )}
+
+                            {(reviewStatus === 'approved' || reviewStatus === 'rejected') && (
+                                <>
+                                    <div className="review-assessment-grid">
+                                        <div className="review-assessment-item">
+                                            <div className="review-assessment-label">{t('detail.securityAssessment')}</div>
+                                            <p>{reviewSecuritySummary}</p>
+                                        </div>
+                                        <div className="review-assessment-item">
+                                            <div className="review-assessment-label">{t('detail.functionalAssessment')}</div>
+                                            <p>{reviewFunctionalSummary}</p>
+                                        </div>
+                                    </div>
+
+                                    {reviewMeta && (
+                                        <div className="review-meta-grid">
+                                            <div className="review-meta-item">
+                                                <span>{t('review.metaStatus')}</span>
+                                                <strong>{mapAIReviewStatusLabel(reviewMeta.status)}</strong>
+                                            </div>
+                                            <div className="review-meta-item">
+                                                <span>{t('review.metaPhase')}</span>
+                                                <strong>{mapAIReviewPhaseLabel(reviewMeta.phase)}</strong>
+                                            </div>
+                                            <div className="review-meta-item">
+                                                <span>{t('review.metaAttempts')}</span>
+                                                <strong>{reviewMeta.attempts}/{reviewMeta.max_attempts}</strong>
+                                            </div>
+                                            <div className="review-meta-item">
+                                                <span>{t('review.metaFiles')}</span>
+                                                <strong>
+                                                    {reviewMeta.progress
+                                                        ? `${reviewMeta.progress.completed_files}/${reviewMeta.progress.total_files}`
+                                                        : '--'}
+                                                </strong>
+                                            </div>
+                                        </div>
+                                    )}
+                                </>
                             )}
 
                             {reviewMeta?.progress && (
@@ -558,9 +908,11 @@ function UploadPage() {
                                     </>
                                 )}
 
-                                <button type="button" className="btn btn-secondary" onClick={resetState}>
-                                    {t('upload.resetForm')}
-                                </button>
+                                {reviewStatus !== 'approved' && (
+                                    <button type="button" className="btn btn-secondary" onClick={resetState}>
+                                        {t('upload.resetForm')}
+                                    </button>
+                                )}
                             </div>
                         </div>
                     ) : (
@@ -612,16 +964,9 @@ function UploadPage() {
                                 <p>{t('upload.humanReviewWaiting')}</p>
                             </div>
 
+                            <small style={{ color: 'var(--warning)' }}>{t('detail.humanReviewNeedOtherUser')}</small>
+
                             <div className="review-actions">
-                                {uploadedSkill && (
-                                    <Link
-                                        to={`/review/${uploadedSkill.id}`}
-                                        state={{ resourceType }}
-                                        className="btn btn-primary"
-                                    >
-                                        {t('upload.humanReviewConfirm')}
-                                    </Link>
-                                )}
                                 <button type="button" className="btn btn-secondary" onClick={resetState}>
                                     {t('upload.uploadAnother')}
                                 </button>
@@ -630,6 +975,84 @@ function UploadPage() {
                     )}
                 </section>
             </div>
+
+            {thumbnailCrop && (
+                <div className="thumb-crop-modal-overlay" onClick={() => !cropApplying && closeThumbnailCropModal(true)}>
+                    <div className="thumb-crop-modal glass-card" onClick={e => e.stopPropagation()}>
+                        <header className="thumb-crop-modal-header">
+                            <h3>{t('upload.thumbnailCropTitle')}</h3>
+                            <p>
+                                {t('upload.thumbnailCropMessage', {
+                                    source: `${thumbnailCrop.meta.width}×${thumbnailCrop.meta.height}`,
+                                    target: `${THUMB_TARGET_WIDTH}×${THUMB_TARGET_HEIGHT}`,
+                                })}
+                            </p>
+                        </header>
+                        <div className="thumb-crop-preview-wrap">
+                            <canvas ref={cropPreviewRef} className="thumb-crop-preview" />
+                        </div>
+                        <div className="thumb-crop-controls">
+                            <label className="thumb-crop-control">
+                                <span>{t('upload.thumbnailCropZoom')}</span>
+                                <input
+                                    type="range"
+                                    min={1}
+                                    max={2.5}
+                                    step={0.01}
+                                    value={thumbnailCrop.zoom}
+                                    onChange={e => updateThumbnailCrop({ zoom: Number(e.target.value) })}
+                                    disabled={cropApplying}
+                                />
+                                <em>{thumbnailCrop.zoom.toFixed(2)}x</em>
+                            </label>
+                            <label className="thumb-crop-control">
+                                <span>{t('upload.thumbnailCropHorizontal')}</span>
+                                <input
+                                    type="range"
+                                    min={0}
+                                    max={1}
+                                    step={0.01}
+                                    value={thumbnailCrop.centerX}
+                                    onChange={e => updateThumbnailCrop({ centerX: Number(e.target.value) })}
+                                    disabled={cropApplying}
+                                />
+                            </label>
+                            <label className="thumb-crop-control">
+                                <span>{t('upload.thumbnailCropVertical')}</span>
+                                <input
+                                    type="range"
+                                    min={0}
+                                    max={1}
+                                    step={0.01}
+                                    value={thumbnailCrop.centerY}
+                                    onChange={e => updateThumbnailCrop({ centerY: Number(e.target.value) })}
+                                    disabled={cropApplying}
+                                />
+                            </label>
+                        </div>
+                        <div className="thumb-crop-actions">
+                            <button
+                                type="button"
+                                className="btn btn-secondary"
+                                onClick={() => closeThumbnailCropModal(true)}
+                                disabled={cropApplying}
+                            >
+                                {t('upload.thumbnailCropCancel')}
+                            </button>
+                            <button
+                                type="button"
+                                className="btn btn-primary"
+                                onClick={() => {
+                                    void handleApplyThumbnailCrop()
+                                }}
+                                disabled={cropApplying}
+                            >
+                                {cropApplying ? t('upload.reviewing') : t('upload.thumbnailCropApply')}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

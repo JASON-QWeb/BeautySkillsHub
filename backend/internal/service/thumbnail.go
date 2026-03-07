@@ -80,11 +80,13 @@ func containsNonASCII(s string) bool {
 	return false
 }
 
-// GenerateThumbnail creates a stylized thumbnail with name + AI-generated subtitle.
-// subtitle is the short functional description from AI (supports Chinese/Unicode).
+// GenerateThumbnail creates a stylized thumbnail with title + functional description.
+// subtitle is typically the resource description or AI summary.
 func GenerateThumbnail(name, subtitle, thumbnailDir string) (string, error) {
 	const width = 300
 	const height = 200
+	const textPanelHeight = 108
+	const textLeft = 16
 
 	img := image.NewRGBA(image.Rect(0, 0, width, height))
 
@@ -106,8 +108,7 @@ func GenerateThumbnail(name, subtitle, thumbnailDir string) (string, error) {
 	drawCircle(img, 40, height-30, 35, color.RGBA{255, 255, 255, 18})
 
 	// Draw bottom dark overlay for text area
-	barHeight := 70
-	barRect := image.Rect(0, height-barHeight, width, height)
+	barRect := image.Rect(0, height-textPanelHeight, width, height)
 	darkOverlay := image.NewUniform(color.RGBA{0, 0, 0, 140})
 	draw.Draw(img, barRect, darkOverlay, image.Point{}, draw.Over)
 
@@ -165,22 +166,18 @@ func GenerateThumbnail(name, subtitle, thumbnailDir string) (string, error) {
 	rgbaImg := image.NewRGBA(decodedImg.Bounds())
 	draw.Draw(rgbaImg, rgbaImg.Bounds(), decodedImg, image.Point{}, draw.Src)
 
-	// Draw large first letter
-	upperName := strings.ToUpper(strings.TrimSpace(name))
-	if len(upperName) > 0 {
-		letter := rune(upperName[0])
-		drawLetterOnImage(rgbaImg, letter, width/2+2, 52, 7, color.RGBA{0, 0, 0, 60})
-		drawLetterOnImage(rgbaImg, letter, width/2, 50, 7, color.RGBA{255, 255, 255, 220})
+	// Draw title near the upper area of text panel.
+	title := truncateTitle(name, 22)
+	titleY := height - textPanelHeight + 26
+	drawTextOnImageLeft(rgbaImg, title, textLeft, titleY, width-2*textLeft, 2, color.RGBA{255, 255, 255, 244})
+
+	// Draw subtitle below title with two lines max.
+	subtitleLines := splitTextByRunes(strings.ToUpper(strings.TrimSpace(subtitle)), 26, 2)
+	if len(subtitleLines) > 0 {
+		drawTextOnImageLeft(rgbaImg, subtitleLines[0], textLeft, titleY+22, width-2*textLeft, 1, color.RGBA{255, 255, 255, 190})
 	}
-
-	// Draw name text on bottom bar
-	title := truncateTitle(name, 18)
-	drawTextOnImage(rgbaImg, title, width/2, height-barHeight+18, width-20, 2, color.RGBA{255, 255, 255, 240})
-
-	// Draw subtitle (AI func_summary) below name
-	if subtitle != "" {
-		sub := truncateTitle(subtitle, 25)
-		drawTextOnImage(rgbaImg, sub, width/2, height-barHeight+42, width-20, 1, color.RGBA{255, 255, 255, 160})
+	if len(subtitleLines) > 1 {
+		drawTextOnImageLeft(rgbaImg, subtitleLines[1], textLeft, titleY+36, width-2*textLeft, 1, color.RGBA{255, 255, 255, 170})
 	}
 
 	// Save final
@@ -204,37 +201,35 @@ func overlayTextSVG(pngPath, name, subtitle string, width, height int) error {
 		return fmt.Errorf("rsvg-convert not found")
 	}
 
-	barTop := height - 70
-
-	// Get first character for large display
-	firstChar := "?"
-	runes := []rune(strings.TrimSpace(name))
-	if len(runes) > 0 {
-		firstChar = string(runes[0])
-	}
+	const textPanelHeight = 108
+	const textLeft = 16
+	barTop := height - textPanelHeight
 
 	// Truncate display texts
 	displayName := name
-	if utf8.RuneCountInString(displayName) > 18 {
-		displayName = string([]rune(displayName)[:17]) + ".."
+	if utf8.RuneCountInString(displayName) > 22 {
+		displayName = string([]rune(displayName)[:20]) + ".."
 	}
-	displaySub := subtitle
-	if utf8.RuneCountInString(displaySub) > 28 {
-		displaySub = string([]rune(displaySub)[:27]) + ".."
+	subLines := splitTextByRunes(strings.TrimSpace(subtitle), 22, 2)
+	subLine1 := ""
+	subLine2 := ""
+	if len(subLines) > 0 {
+		subLine1 = subLines[0]
+	}
+	if len(subLines) > 1 {
+		subLine2 = subLines[1]
 	}
 
 	// Build SVG overlay
 	svgContent := fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d">
-  <text x="%d" y="%d" text-anchor="middle" fill="rgba(0,0,0,0.25)" font-size="72" font-family="sans-serif" font-weight="bold">%s</text>
-  <text x="%d" y="%d" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-size="72" font-family="sans-serif" font-weight="bold">%s</text>
-  <text x="%d" y="%d" text-anchor="middle" fill="white" font-size="16" font-family="sans-serif" font-weight="bold">%s</text>
-  <text x="%d" y="%d" text-anchor="middle" fill="rgba(255,255,255,0.65)" font-size="11" font-family="sans-serif">%s</text>
+  <text x="%d" y="%d" fill="white" font-size="16" font-family="sans-serif" font-weight="bold">%s</text>
+  <text x="%d" y="%d" fill="rgba(255,255,255,0.82)" font-size="11" font-family="sans-serif">%s</text>
+  <text x="%d" y="%d" fill="rgba(255,255,255,0.72)" font-size="11" font-family="sans-serif">%s</text>
 </svg>`,
 		width, height,
-		width/2+2, 80, escapeXML(firstChar),
-		width/2, 78, escapeXML(firstChar),
-		width/2, barTop+24, escapeXML(displayName),
-		width/2, barTop+44, escapeXML(displaySub),
+		textLeft, barTop+28, escapeXML(displayName),
+		textLeft, barTop+50, escapeXML(subLine1),
+		textLeft, barTop+66, escapeXML(subLine2),
 	)
 
 	// Write SVG to temp file
@@ -390,6 +385,43 @@ func drawTextOnImage(img *image.RGBA, text string, cx, cy, maxWidth, maxScale in
 	}
 }
 
+// drawTextOnImageLeft draws a string from left to right, auto-scaling to fit maxWidth.
+func drawTextOnImageLeft(img *image.RGBA, text string, leftX, cy, maxWidth, maxScale int, col color.RGBA) {
+	charCount := utf8.RuneCountInString(text)
+	if charCount == 0 {
+		return
+	}
+
+	charWidthBase := 6
+	totalBaseWidth := charCount*charWidthBase - 1
+
+	scale := maxScale
+	for scale > 1 && totalBaseWidth*scale > maxWidth {
+		scale--
+	}
+
+	charWidth := charWidthBase * scale
+	maxChars := maxWidth / charWidth
+	if maxChars < 1 {
+		maxChars = 1
+	}
+
+	displayText := text
+	displayRunes := []rune(text)
+	if len(displayRunes) > maxChars {
+		if maxChars > 2 {
+			displayText = string(displayRunes[:maxChars-1]) + "."
+		} else {
+			displayText = string(displayRunes[:maxChars])
+		}
+	}
+
+	for i, ch := range []rune(displayText) {
+		letterCX := leftX + i*charWidth + (5*scale)/2
+		drawLetterOnImage(img, ch, letterCX, cy, scale, col)
+	}
+}
+
 // truncateTitle shortens a title for display.
 func truncateTitle(name string, maxRunes int) string {
 	upper := strings.ToUpper(strings.TrimSpace(name))
@@ -401,4 +433,37 @@ func truncateTitle(name string, maxRunes int) string {
 		return string(runes[:maxRunes-2]) + ".."
 	}
 	return string(runes[:maxRunes])
+}
+
+func splitTextByRunes(text string, maxRunesPerLine, maxLines int) []string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" || maxRunesPerLine <= 0 || maxLines <= 0 {
+		return nil
+	}
+
+	runes := []rune(trimmed)
+	lines := make([]string, 0, maxLines)
+
+	for len(runes) > 0 && len(lines) < maxLines {
+		if len(runes) <= maxRunesPerLine {
+			lines = append(lines, string(runes))
+			runes = nil
+			break
+		}
+
+		if len(lines) == maxLines-1 {
+			take := maxRunesPerLine
+			if take > 2 {
+				take -= 2
+			}
+			lines = append(lines, string(runes[:take])+"..")
+			runes = nil
+			break
+		}
+
+		lines = append(lines, string(runes[:maxRunesPerLine]))
+		runes = runes[maxRunesPerLine:]
+	}
+
+	return lines
 }

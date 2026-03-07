@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useI18n } from '../../i18n/I18nProvider'
-import { Skill, deleteSkill, favoriteSkill, fetchSkill, fetchSkillReadme, getDownloadUrl, likeSkill, submitHumanReview, trackDownloadHit, unfavoriteSkill, updateSkill } from '../../services/api'
+import { DeleteProgressStage, Skill, deleteSkill, deleteSkillWithProgress, favoriteSkill, fetchSkill, fetchSkillReadme, getDownloadUrl, likeSkill, submitHumanReview, trackDownloadHit, unfavoriteSkill, unlikeSkill, updateSkill } from '../../services/api'
 import { useDialog } from '../../contexts/DialogContext'
+import LoadingBars from '../../components/LoadingBars'
 import { formatDate, formatSize } from './formatters'
 
 function formatDownloads(downloads: number) {
@@ -87,28 +88,76 @@ function parseMarkdown(text: string) {
     return html
 }
 
+interface ReadmeFrontMatter {
+    name?: string
+    description?: string
+    [key: string]: string | undefined
+}
+
+interface ParsedReadme {
+    body: string
+    frontMatter: ReadmeFrontMatter
+}
+
+function parseReadmeFrontMatter(raw: string): ParsedReadme {
+    const source = raw || ''
+    const match = source.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n)?/)
+    if (!match) {
+        return {
+            body: source,
+            frontMatter: {},
+        }
+    }
+
+    const metadata: ReadmeFrontMatter = {}
+    const lines = match[1].split(/\r?\n/)
+    for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed || trimmed.startsWith('#')) continue
+        const idx = trimmed.indexOf(':')
+        if (idx <= 0) continue
+        const key = trimmed.slice(0, idx).trim().toLowerCase()
+        const value = trimmed.slice(idx + 1).trim()
+        if (!key || !value) continue
+        metadata[key] = value
+    }
+
+    return {
+        body: source.slice(match[0].length),
+        frontMatter: metadata,
+    }
+}
+
 function normalizeSummaryLine(line: string) {
     return line
         .replace(/^(安全性|安全|功能性|功能|security|function)\s*[:：-]?\s*/i, '')
         .trim()
 }
 
-function extractAISummaryLines(skill: Skill | null): string[] {
-    if (!skill) return []
+function extractAIFunctionSummary(skill: Skill | null): string {
+    if (!skill) return ''
 
     const lines = (skill.ai_description || '')
         .split('\n')
-        .map(line => normalizeSummaryLine(line))
-        .filter(Boolean)
-
-    if (lines.length > 0) return lines.slice(0, 3)
-
-    const fallback = (skill.ai_feedback || '')
-        .split(/[\n。！？]/)
         .map(line => line.trim())
         .filter(Boolean)
 
-    return fallback.slice(0, 3)
+    const explicitFunctionLine = lines.find(line => /^(功能性|功能|functional|function)\s*[:：-]?/i.test(line))
+    if (explicitFunctionLine) {
+        return normalizeSummaryLine(explicitFunctionLine)
+    }
+
+    const nonSafetyLine = lines.find(line => !/^(安全性|安全|security)\s*[:：-]?/i.test(line))
+    if (nonSafetyLine) {
+        return normalizeSummaryLine(nonSafetyLine)
+    }
+
+    const feedbackFallback = (skill.ai_feedback || '')
+        .split(/[\n。！？]/)
+        .map(line => line.trim())
+        .find(Boolean)
+
+    return feedbackFallback || ''
 }
 
 function extractSafetyChecks(skill: Skill | null): string[] {
@@ -164,6 +213,13 @@ function FallbackThumb({ name, description }: { name: string; description?: stri
 }
 
 const readmeGlobalCache = new Map<number, string>()
+type DeleteFlowStage = DeleteProgressStage | 'done'
+const DELETE_FLOW_ORDER: DeleteFlowStage[] = ['db', 'github', 'done']
+
+function stageRank(stage: DeleteFlowStage) {
+    const idx = DELETE_FLOW_ORDER.indexOf(stage)
+    return idx >= 0 ? idx : 0
+}
 
 function SkillDetailPage() {
     const { id } = useParams<{ id: string }>()
@@ -183,6 +239,9 @@ function SkillDetailPage() {
     const [editName, setEditName] = useState('')
     const [editDescription, setEditDescription] = useState('')
     const [deleting, setDeleting] = useState(false)
+    const [deleteModalOpen, setDeleteModalOpen] = useState(false)
+    const [deleteStage, setDeleteStage] = useState<DeleteFlowStage>('db')
+    const [deleteGithubWarning, setDeleteGithubWarning] = useState('')
     const [copied, setCopied] = useState(false)
     const [reviewingHuman, setReviewingHuman] = useState(false)
     const [liking, setLiking] = useState(false)
@@ -292,8 +351,20 @@ function SkillDetailPage() {
         return getDownloadUrl(skill.id, skill.resource_type)
     }, [skill])
 
-    const aiSummaryLines = useMemo(() => extractAISummaryLines(skill), [skill])
+    const parsedReadme = useMemo(() => parseReadmeFrontMatter(readmeContent), [readmeContent])
+    const readmeDescription = useMemo(() => {
+        return (parsedReadme.frontMatter.description || '').trim()
+    }, [parsedReadme.frontMatter.description])
+    const displayedReadmeContent = useMemo(() => {
+        return parsedReadme.body.trim()
+    }, [parsedReadme.body])
+    const aiFunctionSummary = useMemo(() => extractAIFunctionSummary(skill), [skill])
     const safetyChecks = useMemo(() => extractSafetyChecks(skill), [skill])
+    const deleteSteps: Array<{ stage: DeleteFlowStage; label: string }> = useMemo(() => ([
+        { stage: 'db', label: t('detail.deleteStepDb') },
+        { stage: 'github', label: t('detail.deleteStepGithub') },
+        { stage: 'done', label: t('detail.deleteStepDone') },
+    ]), [t])
 
     if (loading) {
         return (
@@ -348,6 +419,13 @@ function SkillDetailPage() {
                         </div>
                     )}
 
+                    {readmeDescription && (
+                        <div className="detail-readme-desc">
+                            <div className="detail-readme-desc-label">{t('detail.readmeDescription')}</div>
+                            <p>{readmeDescription}</p>
+                        </div>
+                    )}
+
                     <div className="detail-terminal">
                         <div className="detail-terminal-text">
                             <span className="detail-terminal-prompt">$</span>
@@ -378,11 +456,7 @@ function SkillDetailPage() {
                         <div className="detail-ai-text">
                             <div className="detail-ai-label">{t('detail.aiReviewSummary')}</div>
                             <div className="detail-ai-summary-lines">
-                                {aiSummaryLines.length > 0 ? aiSummaryLines.map((line, idx) => (
-                                    <p key={`${idx}-${line}`}>{line}</p>
-                                )) : (
-                                    <p>{t('detail.aiReviewFallback')}</p>
-                                )}
+                                <p>{aiFunctionSummary || t('detail.aiReviewFallback')}</p>
                             </div>
                         </div>
                     </div>
@@ -395,7 +469,7 @@ function SkillDetailPage() {
                     <div
                         className="detail-description markdown-body"
                         dangerouslySetInnerHTML={{
-                            __html: parseMarkdown(readmeContent || skill.description || t('detail.descriptionFallback'))
+                            __html: parseMarkdown(displayedReadmeContent || readmeDescription || skill.description || t('detail.descriptionFallback'))
                         }}
                     />
                 </main>
@@ -438,12 +512,21 @@ function SkillDetailPage() {
                                     className={`btn btn-secondary btn-sm ${userLiked ? 'detail-like-btn-liked' : ''}`}
                                     onClick={async () => {
                                         if (liking) return
+                                        const prevLiked = userLiked
+                                        const prevLikesCount = likesCount
+                                        const nextLiked = !prevLiked
+                                        setUserLiked(nextLiked)
+                                        setLikesCount(prev => Math.max(0, prev + (nextLiked ? 1 : -1)))
                                         setLiking(true)
                                         try {
-                                            const result = await likeSkill(skill.id, skill.resource_type)
-                                            setLikesCount(result.likes_count || likesCount)
+                                            const result = nextLiked
+                                                ? await likeSkill(skill.id, skill.resource_type)
+                                                : await unlikeSkill(skill.id, skill.resource_type)
+                                            setLikesCount(result.likes_count ?? prevLikesCount)
                                             setUserLiked(!!result.liked)
                                         } catch (err) {
+                                            setUserLiked(prevLiked)
+                                            setLikesCount(prevLikesCount)
                                             await showAlert(err instanceof Error ? err.message : t('detail.likeFailed'))
                                         } finally {
                                             setLiking(false)
@@ -460,16 +543,18 @@ function SkillDetailPage() {
                                     className={`btn btn-secondary btn-sm ${favorited ? 'detail-favorite-btn-active' : ''}`}
                                     onClick={async () => {
                                         if (favoriting) return
+                                        const prevFavorited = favorited
+                                        const nextFavorited = !prevFavorited
+                                        setFavorited(nextFavorited)
                                         setFavoriting(true)
                                         try {
-                                            if (favorited) {
+                                            if (prevFavorited) {
                                                 await unfavoriteSkill(skill.id, skill.resource_type)
-                                                setFavorited(false)
                                             } else {
                                                 await favoriteSkill(skill.id, skill.resource_type)
-                                                setFavorited(true)
                                             }
                                         } catch (err) {
+                                            setFavorited(prevFavorited)
                                             await showAlert(err instanceof Error ? err.message : t('detail.favoriteFailed'))
                                         } finally {
                                             setFavoriting(false)
@@ -556,11 +641,33 @@ function SkillDetailPage() {
                                     className="btn btn-secondary"
                                     onClick={async () => {
                                         if (!(await showConfirm(t('detail.confirmDelete')))) return
+                                        const isSkillResource = (skill.resource_type || 'skill') === 'skill'
+                                        if (isSkillResource) {
+                                            setDeleteStage('db')
+                                            setDeleteGithubWarning('')
+                                            setDeleteModalOpen(true)
+                                        }
                                         setDeleting(true)
                                         try {
-                                            await deleteSkill(skill.id, skill.resource_type)
+                                            if (isSkillResource) {
+                                                const result = await deleteSkillWithProgress(
+                                                    skill.id,
+                                                    skill.resource_type,
+                                                    (stage) => setDeleteStage(stage),
+                                                )
+                                                if (result.github_error) {
+                                                    setDeleteGithubWarning(result.github_error)
+                                                }
+                                                setDeleteStage('done')
+                                                await new Promise(resolve => setTimeout(resolve, 420))
+                                            } else {
+                                                await deleteSkill(skill.id, skill.resource_type)
+                                            }
                                             navigate(`/resource/${skill.resource_type || 'skill'}`)
                                         } catch (err) {
+                                            if (isSkillResource) {
+                                                setDeleteModalOpen(false)
+                                            }
                                             await showAlert(err instanceof Error ? err.message : t('detail.deleteFailed'))
                                         } finally {
                                             setDeleting(false)
@@ -640,6 +747,36 @@ function SkillDetailPage() {
                     </div>
                 </aside>
             </div>
+
+            {deleteModalOpen && (
+                <div className="delete-progress-overlay">
+                    <div className="delete-progress-modal glass-card" role="alertdialog" aria-modal="true" aria-live="polite">
+                        <LoadingBars className="delete-progress-loader" />
+                        <h3>{t('detail.deleteProgressTitle')}</h3>
+                        <p>{t('detail.deleteProgressSubtitle')}</p>
+                        <div className="delete-progress-steps">
+                            {deleteSteps.map(step => {
+                                const done = stageRank(deleteStage) > stageRank(step.stage)
+                                const active = stageRank(deleteStage) === stageRank(step.stage)
+                                return (
+                                    <div
+                                        key={step.stage}
+                                        className={`delete-progress-step ${done ? 'done' : ''} ${active ? 'active' : ''}`.trim()}
+                                    >
+                                        <span className="delete-progress-dot">{done ? '✓' : active ? '●' : '○'}</span>
+                                        <span>{step.label}</span>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                        {deleteGithubWarning && (
+                            <div className="delete-progress-warning">
+                                {t('detail.deleteGithubWarning', { error: deleteGithubWarning })}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

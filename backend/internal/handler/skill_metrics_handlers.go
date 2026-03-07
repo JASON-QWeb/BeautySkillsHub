@@ -64,6 +64,42 @@ func (h *SkillHandler) LikeSkill(c *gin.Context) {
 	})
 }
 
+// UnlikeSkill handles DELETE /api/skills/:id/like.
+func (h *SkillHandler) UnlikeSkill(c *gin.Context) {
+	userID, _, ok := currentUserIdentity(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录或登录状态无效"})
+		return
+	}
+
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 ID"})
+		return
+	}
+
+	skill, err := h.getSkillResource(uint(id))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "资源不存在"})
+		return
+	}
+	if !skill.AIApproved {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "AI 审核未通过，无法取消点赞"})
+		return
+	}
+
+	liked, likesCount, err := h.skillSvc.UnlikeSkill(uint(id), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "取消点赞失败"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"liked":       liked,
+		"likes_count": likesCount,
+	})
+}
+
 // TrackDownloadHit handles POST /api/skills/:id/download-hit.
 func (h *SkillHandler) TrackDownloadHit(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)

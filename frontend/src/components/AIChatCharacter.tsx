@@ -24,7 +24,7 @@ export function AIChatCharacter({ isOpen, isTyping, showOnboarding, onClick, cla
     const userTypingTimer = useRef<ReturnType<typeof setTimeout>>()
 
     const [skin, setSkin] = useState<SkinType>(() => {
-        return (localStorage.getItem('ai-skin') as SkinType) || 'default'
+        return (localStorage.getItem('ai-skin') as SkinType) || 'cat'
     })
 
     useEffect(() => {
