@@ -33,9 +33,10 @@ func main() {
 	aiSvc := ai.NewService(cfg)
 	githubSyncSvc := service.NewGitHubSyncService(cfg, nil)
 	var skillContextCache service.SkillContextCache
+	var redisClient *redis.Client
 
 	if cfg.RedisAddr != "" {
-		redisClient := redis.NewClient(&redis.Options{
+		redisClient = redis.NewClient(&redis.Options{
 			Addr:     cfg.RedisAddr,
 			Password: cfg.RedisPassword,
 			DB:       cfg.RedisDB,
@@ -75,17 +76,19 @@ func main() {
 	// Setup Gin
 	r := gin.Default()
 	r.MaxMultipartMemory = handler.MultipartFormMemoryLimit
-	r.Use(middleware.CORS())
+	r.Use(middleware.SecurityHeaders(securityHeadersConfigFromConfig(cfg)))
+	r.Use(middleware.CORS(corsConfigFromConfig(cfg)))
 
 	uploadLimitMiddleware := middleware.LimitMultipartBody(handler.MaxUploadRequestBodySize, handler.MultipartFormMemoryLimit)
 	contentAssetLimitMiddleware := middleware.LimitMultipartBody(handler.MaxContentAssetRequestBodySize, handler.MultipartFormMemoryLimit)
+	limiters := newRouteRateLimiters(cfg, newRateLimitStore(redisClient), time.Now)
 
 	// API routes
 	api := r.Group("/api")
 	{
 		// Auth endpoints
-		api.POST("/auth/register", authHandler.Register)
-		api.POST("/auth/login", authHandler.Login)
+		api.POST("/auth/register", limiters.authRegister, authHandler.Register)
+		api.POST("/auth/login", limiters.authLogin, authHandler.Login)
 		api.GET("/auth/me", authHandler.AuthMiddleware(), authHandler.GetMe)
 
 		// Skill/Resource endpoints (public reads + optional auth context)
@@ -103,7 +106,7 @@ func main() {
 		// Protected: upload, update & delete require auth
 		api.POST("/skills", authHandler.AuthMiddleware(), uploadLimitMiddleware, skillHandler.UploadSkill)
 		api.GET("/skills/:id/review-status", authHandler.AuthMiddleware(), skillHandler.GetSkillReviewStatus)
-		api.POST("/skills/:id/review/retry", authHandler.AuthMiddleware(), skillHandler.RetrySkillReview)
+		api.POST("/skills/:id/review/retry", authHandler.AuthMiddleware(), limiters.reviewRetry, skillHandler.RetrySkillReview)
 		api.PUT("/skills/:id", authHandler.AuthMiddleware(), uploadLimitMiddleware, skillHandler.UpdateSkill)
 		api.DELETE("/skills/:id/stream-delete", authHandler.AuthMiddleware(), skillHandler.StreamDeleteSkill)
 		api.DELETE("/skills/:id", authHandler.AuthMiddleware(), skillHandler.DeleteSkill)
@@ -126,7 +129,7 @@ func main() {
 		api.GET("/avatars/:filename", authHandler.ServeAvatar)
 
 		// AI Chat
-		api.POST("/ai/chat", skillHandler.ChatRecommend)
+		api.POST("/ai/chat", limiters.aiChat, skillHandler.ChatRecommend)
 
 		// MCP resource routes
 		handler.RegisterResourceRoutes(api, mcpHandler, authHandler.AuthMiddleware(), authHandler.OptionalAuthMiddleware(), uploadLimitMiddleware, "/mcps")
@@ -151,7 +154,7 @@ func main() {
 		rulesProtected.Use(authHandler.AuthMiddleware())
 		rulesProtected.POST("", uploadLimitMiddleware, skillHandler.UploadSkill)
 		rulesProtected.GET("/:id/review-status", skillHandler.GetSkillReviewStatus)
-		rulesProtected.POST("/:id/review/retry", skillHandler.RetrySkillReview)
+		rulesProtected.POST("/:id/review/retry", limiters.reviewRetry, skillHandler.RetrySkillReview)
 		rulesProtected.POST("/:id/human-review", skillHandler.HumanReviewSkill)
 		rulesProtected.PUT("/:id", uploadLimitMiddleware, skillHandler.UpdateSkill)
 		rulesProtected.DELETE("/:id", rulesHandler.Delete)

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestLoad_UsesDotEnvLocalValuesWhenProcessEnvIsUnset(t *testing.T) {
@@ -169,6 +170,104 @@ func TestLoad_GitHubDefaults(t *testing.T) {
 	}
 	if cfg.AISkillsInvalidateChannel != "ai:skills_context:invalidate" {
 		t.Fatalf("expected default invalidate channel, got %q", cfg.AISkillsInvalidateChannel)
+	}
+	if len(cfg.CORSAllowedOrigins) == 0 {
+		t.Fatal("expected local development CORS origins to be populated by default")
+	}
+	if cfg.CORSMaxAge != 10*time.Minute {
+		t.Fatalf("expected default CORS max age 10m, got %v", cfg.CORSMaxAge)
+	}
+	if cfg.SecurityCSP == "" {
+		t.Fatal("expected default CSP to be set")
+	}
+	if cfg.HSTSMaxAge != 365*24*time.Hour {
+		t.Fatalf("expected default HSTS max age 365 days, got %v", cfg.HSTSMaxAge)
+	}
+	if cfg.LoginRateLimitCapacity != 5 {
+		t.Fatalf("expected default login rate limit capacity 5, got %d", cfg.LoginRateLimitCapacity)
+	}
+	if cfg.LoginRateLimitWindow != time.Minute {
+		t.Fatalf("expected default login rate limit window 1m, got %v", cfg.LoginRateLimitWindow)
+	}
+}
+
+func TestLoad_SecurityOverrides(t *testing.T) {
+	tmp := t.TempDir()
+
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com, https://admin.example.com")
+	t.Setenv("CORS_ALLOWED_METHODS", "GET,POST,OPTIONS")
+	t.Setenv("CORS_ALLOWED_HEADERS", "Content-Type,Authorization")
+	t.Setenv("CORS_EXPOSED_HEADERS", "Content-Disposition,X-Request-Id")
+	t.Setenv("CORS_MAX_AGE", "15m")
+	t.Setenv("SECURITY_CSP", "default-src 'none'; frame-ancestors 'none'")
+	t.Setenv("SECURITY_CSP_REPORT_ONLY", "true")
+	t.Setenv("HSTS_ENABLED", "true")
+	t.Setenv("HSTS_MAX_AGE", "720h")
+	t.Setenv("HSTS_INCLUDE_SUBDOMAINS", "true")
+	t.Setenv("HSTS_PRELOAD", "true")
+	t.Setenv("RATE_LIMIT_LOGIN_CAPACITY", "7")
+	t.Setenv("RATE_LIMIT_LOGIN_WINDOW", "2m")
+	t.Setenv("RATE_LIMIT_REGISTER_CAPACITY", "3")
+	t.Setenv("RATE_LIMIT_REGISTER_WINDOW", "30m")
+	t.Setenv("RATE_LIMIT_REVIEW_RETRY_CAPACITY", "4")
+	t.Setenv("RATE_LIMIT_REVIEW_RETRY_WINDOW", "10m")
+	t.Setenv("RATE_LIMIT_AI_CHAT_CAPACITY", "25")
+	t.Setenv("RATE_LIMIT_AI_CHAT_WINDOW", "1m")
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get wd: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(wd)
+	})
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("chdir temp dir: %v", err)
+	}
+
+	cfg := Load()
+	if len(cfg.CORSAllowedOrigins) != 2 {
+		t.Fatalf("expected 2 cors origins, got %d", len(cfg.CORSAllowedOrigins))
+	}
+	if cfg.CORSAllowedOrigins[0] != "https://app.example.com" {
+		t.Fatalf("unexpected first origin %q", cfg.CORSAllowedOrigins[0])
+	}
+	if cfg.CORSAllowedMethods[2] != "OPTIONS" {
+		t.Fatalf("expected methods to be parsed, got %v", cfg.CORSAllowedMethods)
+	}
+	if cfg.CORSExposedHeaders[1] != "X-Request-Id" {
+		t.Fatalf("expected exposed headers to be parsed, got %v", cfg.CORSExposedHeaders)
+	}
+	if cfg.CORSMaxAge != 15*time.Minute {
+		t.Fatalf("expected CORS max age 15m, got %v", cfg.CORSMaxAge)
+	}
+	if !cfg.SecurityCSPReportOnly {
+		t.Fatal("expected CSP report-only to be enabled")
+	}
+	if !cfg.HSTSEnabled {
+		t.Fatal("expected HSTS to be enabled")
+	}
+	if cfg.HSTSMaxAge != 720*time.Hour {
+		t.Fatalf("expected HSTS max age 720h, got %v", cfg.HSTSMaxAge)
+	}
+	if !cfg.HSTSIncludeSubdomains {
+		t.Fatal("expected HSTS includeSubDomains to be enabled")
+	}
+	if !cfg.HSTSPreload {
+		t.Fatal("expected HSTS preload to be enabled")
+	}
+	if cfg.LoginRateLimitCapacity != 7 {
+		t.Fatalf("expected login capacity 7, got %d", cfg.LoginRateLimitCapacity)
+	}
+	if cfg.RegisterRateLimitCapacity != 3 {
+		t.Fatalf("expected register capacity 3, got %d", cfg.RegisterRateLimitCapacity)
+	}
+	if cfg.ReviewRetryRateLimitCapacity != 4 {
+		t.Fatalf("expected review retry capacity 4, got %d", cfg.ReviewRetryRateLimitCapacity)
+	}
+	if cfg.AIChatRateLimitCapacity != 25 {
+		t.Fatalf("expected AI chat capacity 25, got %d", cfg.AIChatRateLimitCapacity)
 	}
 }
 
