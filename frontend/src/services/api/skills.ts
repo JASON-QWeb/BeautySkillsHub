@@ -384,7 +384,7 @@ export async function updateSkill(id: number, payload: SkillUpdatePayload, resou
     return data.skill ?? data
 }
 
-export async function updateResourceFromUpload(id: number, formData: FormData, resourceType: 'mcp' | 'tools'): Promise<Skill> {
+export async function updateResourceFromUpload(id: number, formData: FormData, resourceType: 'skill' | 'rules' | 'mcp' | 'tools'): Promise<Skill> {
     const rawTags = formData.get('tags')
     if (typeof rawTags === 'string') {
         formData.set('tags', normalizeTagsForUpload(rawTags))

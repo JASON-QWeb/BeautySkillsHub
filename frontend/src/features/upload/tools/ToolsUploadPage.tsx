@@ -5,6 +5,7 @@ import { useDialog } from '../../../contexts/DialogContext'
 import { useI18n } from '../../../i18n/I18nProvider'
 import { parseMarkdown } from '../../detail/shared/markdown'
 import { fetchSkill, updateResourceFromUpload, uploadContentImage, uploadSkill } from '../../../services/api'
+import { addTagItem, MAX_UPLOAD_TAGS, normalizeTagList, serializeTagList } from '../shared/tagInput'
 
 // Constants for cropping
 const THUMB_TARGET_WIDTH = 1200
@@ -164,7 +165,8 @@ function ToolsUploadPage() {
     const isEditMode = Number.isInteger(editId) && editId > 0
 
     const [name, setName] = useState('')
-    const [tags, setTags] = useState('')
+    const [tagInput, setTagInput] = useState('')
+    const [tagItems, setTagItems] = useState<string[]>([])
     const [description, setDescription] = useState('')
     const [packageFile, setPackageFile] = useState<File | null>(null)
     const [thumbnail, setThumbnail] = useState<File | null>(null)
@@ -216,7 +218,8 @@ function ToolsUploadPage() {
                 }
 
                 setName(skill.name || '')
-                setTags(skill.tags || '')
+                setTagInput('')
+                setTagItems(normalizeTagList(skill.tags || ''))
                 setDescription(skill.description || '')
                 setExistingThumbnailUrl(skill.thumbnail_url || '')
             })
@@ -276,6 +279,15 @@ function ToolsUploadPage() {
         if (!thumbnailCrop || !cropImageRef.current || !cropPreviewRef.current) return
         drawCropPreview(cropPreviewRef.current, cropImageRef.current, thumbnailCrop)
     }, [thumbnailCrop?.zoom, thumbnailCrop?.centerX, thumbnailCrop?.centerY])
+
+    const commitTagInput = () => {
+        setTagItems(prev => addTagItem(prev, tagInput))
+        setTagInput('')
+    }
+
+    const removeTag = (value: string) => {
+        setTagItems(prev => prev.filter(tag => tag !== value))
+    }
 
     const formatFileSize = (bytes: number) => {
         if (bytes === 0) return '0 B'
@@ -350,8 +362,15 @@ function ToolsUploadPage() {
         formData.append('description', description)
         formData.append('resource_type', 'tools')
         formData.append('author', user?.username || 'Anonymous')
-        formData.append('tags', tags.trim())
+        const finalTagItems = addTagItem(tagItems, tagInput)
+        formData.append('tags', serializeTagList(finalTagItems))
         formData.append('upload_mode', packageFile ? 'file' : 'metadata')
+
+        if (finalTagItems.length !== tagItems.length || tagInput.trim()) {
+            setTagItems(finalTagItems)
+            setTagInput('')
+        }
+
         if (packageFile) {
             formData.append('file', packageFile)
         }
@@ -427,11 +446,38 @@ function ToolsUploadPage() {
                             <label className="modern-label">{t('upload.tags')}</label>
                             <input
                                 className="modern-input"
-                                value={tags}
-                                onChange={e => setTags(e.target.value.toLowerCase())}
+                                value={tagInput}
+                                onChange={e => setTagInput(e.target.value)}
+                                onKeyDown={e => {
+                                    if (e.key !== 'Enter') return
+                                    e.preventDefault()
+                                    commitTagInput()
+                                }}
                                 placeholder={t('upload.tagsPlaceholder')}
-                                disabled={uploading || prefillLoading}
+                                disabled={uploading || prefillLoading || tagItems.length >= MAX_UPLOAD_TAGS}
                             />
+                            <small className="upload-tag-counter">
+                                {t('upload.tagHint')} {tagItems.length}/{MAX_UPLOAD_TAGS}
+                            </small>
+                            {tagItems.length >= MAX_UPLOAD_TAGS && (
+                                <small className="upload-tag-limit">{t('upload.tagLimit')}</small>
+                            )}
+                            {tagItems.length > 0 && (
+                                <div className="upload-tag-list">
+                                    {tagItems.map(tag => (
+                                        <button
+                                            key={tag}
+                                            type="button"
+                                            className="upload-tag-chip"
+                                            onClick={() => removeTag(tag)}
+                                            disabled={uploading || prefillLoading}
+                                            aria-label={`${t('upload.removeTag')}: ${tag}`}
+                                        >
+                                            {tag} ×
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                         </div>
 
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>

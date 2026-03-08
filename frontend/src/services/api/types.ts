@@ -29,6 +29,11 @@ export interface Skill {
     human_reviewer?: string
     human_review_feedback?: string
     human_reviewed_at?: string
+    has_pending_revision?: boolean
+    pending_revision_id?: number
+    pending_revision_ai?: 'queued' | 'running' | 'passed' | 'failed_retryable' | 'failed_terminal'
+    pending_revision_human?: 'pending' | 'approved' | 'rejected'
+    pending_revision_updated_at?: string
     published?: boolean
     github_path?: string
     github_files?: string

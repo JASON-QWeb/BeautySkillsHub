@@ -1,28 +1,34 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useDialog } from '../../../contexts/DialogContext'
 import { useI18n } from '../../../i18n/I18nProvider'
 import { RESOURCE_TYPES } from '../../../services/api'
-import { Skill, SkillReviewStatusResponse, fetchSkillReviewStatus, retrySkillReview, uploadSkill } from '../../../services/api'
+import { Skill, SkillReviewStatusResponse, fetchSkill, fetchSkillReadme, fetchSkillReviewStatus, retrySkillReview, updateResourceFromUpload, uploadSkill } from '../../../services/api'
 import FlowStepIcon from '../../../components/FlowStepIcon'
+import { addTagItem, MAX_UPLOAD_TAGS, normalizeTagList, serializeTagList } from '../shared/tagInput'
 
 type RulesInputMode = 'file' | 'paste'
 type ReviewStatus = 'idle' | 'pending' | 'approved' | 'rejected'
 
 function RulesUploadPage() {
     const navigate = useNavigate()
+    const [searchParams] = useSearchParams()
     const { t } = useI18n()
     const { user } = useAuth()
     const { showAlert } = useDialog()
+    const editId = Number(searchParams.get('edit') || 0)
+    const isEditMode = Number.isInteger(editId) && editId > 0
 
     const [name, setName] = useState('')
     const [description, setDescription] = useState('')
-    const [tags, setTags] = useState('')
+    const [tagInput, setTagInput] = useState('')
+    const [tagItems, setTagItems] = useState<string[]>([])
     const [mode, setMode] = useState<RulesInputMode>('file')
     const [file, setFile] = useState<File | null>(null)
     const [markdownContent, setMarkdownContent] = useState('')
     const [uploading, setUploading] = useState(false)
+    const [prefillLoading, setPrefillLoading] = useState(false)
     const [step, setStep] = useState(1)
     const [reviewStatus, setReviewStatus] = useState<ReviewStatus>('idle')
     const [feedback, setFeedback] = useState('')
@@ -35,9 +41,10 @@ function RulesUploadPage() {
 
     const canSubmit = useMemo(() => {
         if (!name.trim()) return false
+        if (isEditMode) return true
         if (mode === 'file') return !!file
         return markdownContent.trim().length > 0
-    }, [name, mode, file, markdownContent])
+    }, [isEditMode, name, mode, file, markdownContent])
 
     const clearReviewPolling = () => {
         if (reviewPollRef.current) {
@@ -49,6 +56,83 @@ function RulesUploadPage() {
     useEffect(() => {
         return () => clearReviewPolling()
     }, [])
+
+    useEffect(() => {
+        if (!isEditMode) {
+            setPrefillLoading(false)
+            return
+        }
+
+        if (!user) {
+            void showAlert('请先登录后再编辑 Rules 资源')
+            navigate('/resource/rules', { replace: true })
+            return
+        }
+
+        let cancelled = false
+        setPrefillLoading(true)
+
+        void Promise.all([
+            fetchSkill(editId, 'rules'),
+            fetchSkillReadme(editId, 'rules').catch(() => ''),
+        ])
+            .then(async ([skill, readme]) => {
+                if (cancelled) return
+
+                const canEdit = (skill.user_id ? skill.user_id === user.id : false)
+                    || (skill.author || '').trim().toLowerCase() === user.username.trim().toLowerCase()
+                if (!canEdit) {
+                    await showAlert('仅上传者本人可以编辑该 Rules 资源')
+                    if (!cancelled) {
+                        navigate(`/resource/rules/${editId}`, { replace: true })
+                    }
+                    return
+                }
+
+                if (skill.has_pending_revision) {
+                    await showAlert('当前已有更新在审核中，请等待本次 Review 完成')
+                    if (!cancelled) {
+                        navigate(`/resource/rules/${editId}`, { replace: true })
+                    }
+                    return
+                }
+
+                setName(skill.name || '')
+                setDescription(skill.description || '')
+                setTagInput('')
+                setTagItems(normalizeTagList(skill.tags || ''))
+                if (readme.trim()) {
+                    setMode('paste')
+                    setMarkdownContent(readme)
+                }
+                setFile(null)
+            })
+            .catch(async err => {
+                if (cancelled) return
+                await showAlert(err instanceof Error ? err.message : '加载待编辑资源失败')
+                if (!cancelled) {
+                    navigate('/resource/rules', { replace: true })
+                }
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setPrefillLoading(false)
+                }
+            })
+
+        return () => {
+            cancelled = true
+        }
+    }, [editId, isEditMode, navigate, showAlert, user])
+
+    const commitTagInput = () => {
+        setTagItems(prev => addTagItem(prev, tagInput))
+        setTagInput('')
+    }
+
+    const removeTag = (value: string) => {
+        setTagItems(prev => prev.filter(tag => tag !== value))
+    }
 
     const applyReviewStatus = (status: SkillReviewStatusResponse) => {
         setReviewMeta(status)
@@ -105,8 +189,14 @@ function RulesUploadPage() {
         formData.append('description', description.trim())
         formData.append('resource_type', 'rules')
         formData.append('author', user?.username || 'Anonymous')
-        formData.append('tags', tags.trim())
+        const finalTagItems = addTagItem(tagItems, tagInput)
+        formData.append('tags', serializeTagList(finalTagItems))
         formData.append('upload_mode', mode === 'paste' ? 'paste' : 'file')
+
+        if (finalTagItems.length !== tagItems.length || tagInput.trim()) {
+            setTagItems(finalTagItems)
+            setTagInput('')
+        }
 
         if (mode === 'file' && file) {
             formData.append('file', file)
@@ -123,11 +213,16 @@ function RulesUploadPage() {
         setReviewMeta(null)
 
         try {
-            const result = await uploadSkill(formData)
-            setUploadedSkill(result.skill)
-            setFeedback(result.feedback || t('upload.reviewPendingText'))
-            if (result.skill?.id) {
-                startReviewPolling(result.skill.id)
+            if (isEditMode) {
+                const updated = await updateResourceFromUpload(editId, formData, 'rules')
+                navigate(`/resource/rules/${updated.id}`, { replace: true })
+            } else {
+                const result = await uploadSkill(formData)
+                setUploadedSkill(result.skill)
+                setFeedback(result.feedback || t('upload.reviewPendingText'))
+                if (result.skill?.id) {
+                    startReviewPolling(result.skill.id)
+                }
             }
         } catch (err) {
             setReviewStatus('rejected')
@@ -156,7 +251,8 @@ function RulesUploadPage() {
         clearReviewPolling()
         setName('')
         setDescription('')
-        setTags('')
+        setTagInput('')
+        setTagItems([])
         setFile(null)
         setMarkdownContent('')
         setMode('file')
@@ -198,9 +294,15 @@ function RulesUploadPage() {
                     {step === 1 ? (
                         <form className="upload-form-card glass-card" onSubmit={handleSubmit}>
                             <header>
-                                <h1>上传 Rules</h1>
-                                <p>支持上传 .md/.txt 或直接粘贴 Markdown 内容。</p>
+                                <h1>{isEditMode ? '更新 Rules' : '上传 Rules'}</h1>
+                                <p>{isEditMode ? '可只修改元数据，也可重新上传规则文件或直接修改 Markdown；提交后会进入新的 Review。' : '支持上传 .md/.txt 或直接粘贴 Markdown 内容。'}</p>
                             </header>
+
+                            {prefillLoading && (
+                                <div className="upload-placeholder-card" style={{ marginBottom: 16 }}>
+                                    <p>{t('common.loadingResources')}</p>
+                                </div>
+                            )}
 
                             <div className="upload-type-tabs">
                                 {reviewedUploadTypes.map((key) => (
@@ -243,11 +345,38 @@ function RulesUploadPage() {
                             <label className="upload-field">
                                 <span>{t('upload.tags')}</span>
                                 <input
-                                    value={tags}
-                                    onChange={e => setTags(e.target.value.toLowerCase())}
+                                    value={tagInput}
+                                    onChange={e => setTagInput(e.target.value)}
+                                    onKeyDown={e => {
+                                        if (e.key !== 'Enter') return
+                                        e.preventDefault()
+                                        commitTagInput()
+                                    }}
                                     placeholder={t('upload.tagsPlaceholder')}
-                                    disabled={uploading}
+                                    disabled={uploading || tagItems.length >= MAX_UPLOAD_TAGS}
                                 />
+                                <small className="upload-tag-counter">
+                                    {t('upload.tagHint')} {tagItems.length}/{MAX_UPLOAD_TAGS}
+                                </small>
+                                {tagItems.length >= MAX_UPLOAD_TAGS && (
+                                    <small className="upload-tag-limit">{t('upload.tagLimit')}</small>
+                                )}
+                                {tagItems.length > 0 && (
+                                    <div className="upload-tag-list">
+                                        {tagItems.map(tag => (
+                                            <button
+                                                key={tag}
+                                                type="button"
+                                                className="upload-tag-chip"
+                                                onClick={() => removeTag(tag)}
+                                                disabled={uploading}
+                                                aria-label={`${t('upload.removeTag')}: ${tag}`}
+                                            >
+                                                {tag} ×
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                             </label>
 
                             <div className="upload-mode-toggle">
@@ -303,8 +432,8 @@ function RulesUploadPage() {
                                 </label>
                             )}
 
-                            <button className="upload-submit-btn" disabled={uploading || !canSubmit}>
-                                {uploading ? t('upload.reviewing') : t('upload.submit')}
+                            <button className="upload-submit-btn" disabled={prefillLoading || uploading || !canSubmit}>
+                                {uploading ? t('upload.reviewing') : (isEditMode ? '提交更新并进入 Review' : t('upload.submit'))}
                             </button>
                         </form>
                     ) : (
