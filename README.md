@@ -254,6 +254,7 @@ migrate -> backend -> frontend
 ## 相关文档
 
 - GitHub 同步配置: [GITHUB_SYNC_SETUP.md](./GITHUB_SYNC_SETUP.md)
+- 数据库结构说明: [db/SCHEMA.md](./db/SCHEMA.md)
 - 架构总览: [ARCHITECTURE.md](./ARCHITECTURE.md)
 - 部署指南: [DEPLOYMENT.md](./DEPLOYMENT.md)
 - GitHub Actions: [GITHUB_ACTIONS.md](./GITHUB_ACTIONS.md)
