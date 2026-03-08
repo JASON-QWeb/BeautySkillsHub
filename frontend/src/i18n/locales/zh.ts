@@ -231,7 +231,7 @@ const zh = {
     'profile.badgeAi': 'AI Pioneer',
     'profile.location': '广州，中国',
     'profile.joined': '已加入 Skills Hub',
-    'profile.link': 'skillshub.dev/{username}',
+    'profile.link': 'skillshub/{username}',
     'profile.performance': '表现概览',
     'profile.reputation': '总点赞量',
     'profile.items': '条目',

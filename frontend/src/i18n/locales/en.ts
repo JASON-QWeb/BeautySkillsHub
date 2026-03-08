@@ -231,7 +231,7 @@ const en = {
     'profile.badgeAi': 'AI Pioneer',
     'profile.location': 'Guangzhou, CN',
     'profile.joined': 'Joined Skills Hub',
-    'profile.link': 'skillshub.dev/{username}',
+    'profile.link': 'skillshub/{username}',
     'profile.performance': 'Performance Overview',
     'profile.reputation': 'Total Likes',
     'profile.items': 'Items',
