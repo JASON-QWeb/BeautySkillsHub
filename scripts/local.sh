@@ -205,7 +205,7 @@ run_dev() {
 
   (
     cd "$BACKEND_DIR"
-    go run ./cmd/server/main.go 2>&1 | sed -u 's/^/[backend] /'
+    go run ./cmd/server/ 2>&1 | sed -u 's/^/[backend] /'
   ) &
   backend_pid=$!
 

@@ -11,6 +11,13 @@ interface RightSidebarProps {
 const TAG_COLORS = ['#1f2a44', '#f3c614', '#8b8b8b', '#c4a24e']
 const TAG_COLORS_DARK = ['#4f83e8', '#35d388', '#f3c614', '#7f98dd']
 
+const RESOURCE_TYPE_LABELS: Record<string, string> = {
+    skill: 'Skill',
+    mcp: 'MCP',
+    tool: 'Tool',
+    rules: 'Rules',
+}
+
 function timeAgo(value: string, language: Language) {
     const date = new Date(value)
     if (Number.isNaN(date.getTime())) {
@@ -58,18 +65,27 @@ function RightSidebar({ resourceType = '' }: RightSidebarProps) {
         return () => controller.abort()
     }, [resourceType])
 
+    const isOverview = !resourceType
+
     useEffect(() => {
         const controller = new AbortController()
-        const loadTags = async () => {
+        const loadComposition = async () => {
             try {
-                const data = await fetchSkills('', 1, 100, '', resourceType, { signal: controller.signal })
+                const data = await fetchSkills('', 1, 200, '', isOverview ? '' : resourceType, { signal: controller.signal })
                 const counts: Record<string, number> = {}
                 for (const skill of data.skills || []) {
-                    if (skill.tags) {
-                        for (const tag of skill.tags.split(',')) {
-                            const normalized = tag.trim().toLowerCase()
-                            if (normalized) {
-                                counts[normalized] = (counts[normalized] || 0) + 1
+                    if (isOverview) {
+                        // Overview: count by resource_type
+                        const rt = skill.resource_type || 'skill'
+                        counts[rt] = (counts[rt] || 0) + 1
+                    } else {
+                        // Category page: count by tags
+                        if (skill.tags) {
+                            for (const tag of skill.tags.split(',')) {
+                                const normalized = tag.trim().toLowerCase()
+                                if (normalized) {
+                                    counts[normalized] = (counts[normalized] || 0) + 1
+                                }
                             }
                         }
                     }
@@ -77,14 +93,14 @@ function RightSidebar({ resourceType = '' }: RightSidebarProps) {
                 setTagCounts(counts)
             } catch (err) {
                 if ((err as Error).name === 'AbortError') return
-                console.error('Failed to load tag composition', err)
+                console.error('Failed to load composition', err)
                 setTagCounts({})
             }
         }
 
-        void loadTags()
+        void loadComposition()
         return () => controller.abort()
-    }, [resourceType])
+    }, [resourceType, isOverview])
 
     const topTags = useMemo(() => {
         return Object.entries(tagCounts)
@@ -166,13 +182,12 @@ function RightSidebar({ resourceType = '' }: RightSidebarProps) {
                 <div>
                     <p className="comp-label">{t('sidebar.totalComposition')}</p>
                     <p className="comp-value">{totalTagCount.toLocaleString()}</p>
-                    <p className="comp-note">{t('sidebar.skillsVsTools')}</p>
                     <div className="comp-breakdown">
                         {topTags.map(([tag, count], idx) => (
                             <div key={tag} className="comp-breakdown-item">
                                 <span>
                                     <span className="comp-color-dot" style={{ background: colors[idx] }} />
-                                    {tag}
+                                    {isOverview ? RESOURCE_TYPE_LABELS[tag] || tag : tag}
                                 </span>
                                 <strong>{count}</strong>
                             </div>

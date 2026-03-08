@@ -255,7 +255,6 @@ const zh = {
     'sidebar.recentlyUploaded': '最近上传',
     'sidebar.noRecent': '暂无最近上传。',
     'sidebar.totalComposition': '总组成',
-    'sidebar.skillsVsTools': 'Skills / Rules / MCP / Tools',
 
     'skillCard.preview': '预览',
     'skillCard.published': '已发布',

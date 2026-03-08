@@ -255,7 +255,6 @@ const en = {
     'sidebar.recentlyUploaded': 'Recently Uploaded',
     'sidebar.noRecent': 'No recent uploads yet.',
     'sidebar.totalComposition': 'Total Composition',
-    'sidebar.skillsVsTools': 'Skills, Rules, MCP, Tools',
 
     'skillCard.preview': 'Preview',
     'skillCard.published': 'Published',
