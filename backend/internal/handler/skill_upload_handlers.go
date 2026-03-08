@@ -55,6 +55,21 @@ func (h *SkillHandler) UploadSkill(c *gin.Context) {
 	author := normalizeSkillAuthor(username, c.PostForm("author"))
 	uploadMode := c.DefaultPostForm("upload_mode", "file")
 
+	if err := validateContentTextFields(contentTextFields{
+		Name:        name,
+		Description: description,
+		Tags:        tags,
+		Author:      author,
+	}); err != nil {
+		var fieldErr *fieldLengthError
+		if errors.As(err, &fieldErr) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": formatSkillFieldLengthError(fieldErr)})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "输入内容过长"})
+		return
+	}
+
 	if name == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "名称不能为空"})
 		return

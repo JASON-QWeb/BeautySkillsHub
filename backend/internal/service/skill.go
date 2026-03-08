@@ -13,6 +13,14 @@ type SkillService struct {
 	db *gorm.DB
 }
 
+var loadLikesCountTx = func(tx *gorm.DB, skillID uint) (int, error) {
+	var skill model.Skill
+	if err := tx.Select("likes_count").First(&skill, skillID).Error; err != nil {
+		return 0, err
+	}
+	return skill.LikesCount, nil
+}
+
 func NewSkillService(db *gorm.DB) *SkillService {
 	return &SkillService{db: db}
 }
@@ -126,12 +134,12 @@ func (s *SkillService) LikeSkill(skillID, userID uint) (bool, int, error) {
 		}
 	}
 
-	if err := tx.Commit().Error; err != nil {
+	count, err := loadLikesCountTx(tx, skillID)
+	if err != nil {
+		tx.Rollback()
 		return false, 0, err
 	}
-
-	count, err := s.GetLikesCount(skillID)
-	if err != nil {
+	if err := tx.Commit().Error; err != nil {
 		return false, 0, err
 	}
 	return true, count, nil
@@ -162,12 +170,12 @@ func (s *SkillService) UnlikeSkill(skillID, userID uint) (bool, int, error) {
 		}
 	}
 
-	if err := tx.Commit().Error; err != nil {
+	count, err := loadLikesCountTx(tx, skillID)
+	if err != nil {
+		tx.Rollback()
 		return false, 0, err
 	}
-
-	count, err := s.GetLikesCount(skillID)
-	if err != nil {
+	if err := tx.Commit().Error; err != nil {
 		return false, 0, err
 	}
 	return false, count, nil

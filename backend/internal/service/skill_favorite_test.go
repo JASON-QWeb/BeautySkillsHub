@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -30,20 +31,35 @@ func createFavoriteTestSkill(t *testing.T, svc *SkillService, name string, statu
 	return skill
 }
 
+func createFavoriteTestUser(t *testing.T, svc *SkillService, id uint) model.User {
+	t.Helper()
+
+	user := model.User{
+		ID:       id,
+		Username: fmt.Sprintf("favorite-user-%d", id),
+		Password: "hashed-password",
+	}
+	if err := svc.db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	return user
+}
+
 func TestAddFavorite_IdempotentAndRemovable(t *testing.T) {
 	svc := newSkillServiceForFavoritesTest(t)
 	skill := createFavoriteTestSkill(t, svc, "Skill A", model.HumanReviewStatusApproved)
+	user := createFavoriteTestUser(t, svc, 9)
 
-	if err := svc.AddFavorite(skill.ID, 9); err != nil {
+	if err := svc.AddFavorite(skill.ID, user.ID); err != nil {
 		t.Fatalf("first add favorite failed: %v", err)
 	}
-	if err := svc.AddFavorite(skill.ID, 9); err != nil {
+	if err := svc.AddFavorite(skill.ID, user.ID); err != nil {
 		t.Fatalf("second add favorite should be idempotent, got: %v", err)
 	}
 
 	var count int64
 	if err := svc.db.Model(&model.SkillFavorite{}).
-		Where("skill_id = ? AND user_id = ?", skill.ID, 9).
+		Where("skill_id = ? AND user_id = ?", skill.ID, user.ID).
 		Count(&count).Error; err != nil {
 		t.Fatalf("count favorites: %v", err)
 	}
@@ -51,7 +67,7 @@ func TestAddFavorite_IdempotentAndRemovable(t *testing.T) {
 		t.Fatalf("expected one favorite record, got %d", count)
 	}
 
-	favorited, err := svc.HasUserFavorited(skill.ID, 9)
+	favorited, err := svc.HasUserFavorited(skill.ID, user.ID)
 	if err != nil {
 		t.Fatalf("has user favorited failed: %v", err)
 	}
@@ -59,10 +75,10 @@ func TestAddFavorite_IdempotentAndRemovable(t *testing.T) {
 		t.Fatalf("expected skill to be favorited")
 	}
 
-	if err := svc.RemoveFavorite(skill.ID, 9); err != nil {
+	if err := svc.RemoveFavorite(skill.ID, user.ID); err != nil {
 		t.Fatalf("remove favorite failed: %v", err)
 	}
-	favorited, err = svc.HasUserFavorited(skill.ID, 9)
+	favorited, err = svc.HasUserFavorited(skill.ID, user.ID)
 	if err != nil {
 		t.Fatalf("has user favorited after remove failed: %v", err)
 	}
@@ -76,19 +92,20 @@ func TestGetUserFavorites_OrderedAndFiltered(t *testing.T) {
 	approved := createFavoriteTestSkill(t, svc, "Approved", model.HumanReviewStatusApproved)
 	pending := createFavoriteTestSkill(t, svc, "Pending", model.HumanReviewStatusPending)
 	rejected := createFavoriteTestSkill(t, svc, "Rejected", model.HumanReviewStatusRejected)
+	user := createFavoriteTestUser(t, svc, 11)
 
-	if err := svc.AddFavorite(approved.ID, 11); err != nil {
+	if err := svc.AddFavorite(approved.ID, user.ID); err != nil {
 		t.Fatalf("add approved favorite: %v", err)
 	}
 	time.Sleep(15 * time.Millisecond)
-	if err := svc.AddFavorite(pending.ID, 11); err != nil {
+	if err := svc.AddFavorite(pending.ID, user.ID); err != nil {
 		t.Fatalf("add pending favorite: %v", err)
 	}
-	if err := svc.AddFavorite(rejected.ID, 11); err != nil {
+	if err := svc.AddFavorite(rejected.ID, user.ID); err != nil {
 		t.Fatalf("add rejected favorite: %v", err)
 	}
 
-	result, err := svc.GetUserFavorites(11, "", 0)
+	result, err := svc.GetUserFavorites(user.ID, "", 0)
 	if err != nil {
 		t.Fatalf("get user favorites: %v", err)
 	}
