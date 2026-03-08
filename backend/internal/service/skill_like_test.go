@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"testing"
 
 	"skill-hub/internal/model"
@@ -29,11 +30,26 @@ func createLikeTestSkill(t *testing.T, svc *SkillService, name string) model.Ski
 	return skill
 }
 
+func createLikeTestUser(t *testing.T, svc *SkillService, id uint) model.User {
+	t.Helper()
+
+	user := model.User{
+		ID:       id,
+		Username: fmt.Sprintf("like-user-%d", id),
+		Password: "hashed-password",
+	}
+	if err := svc.db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	return user
+}
+
 func TestLikeAndUnlikeSkill_ToggleAndCount(t *testing.T) {
 	svc := newSkillServiceForLikesTest(t)
 	skill := createLikeTestSkill(t, svc, "Skill Like A")
+	user := createLikeTestUser(t, svc, 10)
 
-	liked, count, err := svc.LikeSkill(skill.ID, 10)
+	liked, count, err := svc.LikeSkill(skill.ID, user.ID)
 	if err != nil {
 		t.Fatalf("first like failed: %v", err)
 	}
@@ -44,7 +60,7 @@ func TestLikeAndUnlikeSkill_ToggleAndCount(t *testing.T) {
 		t.Fatalf("expected likes_count=1 after first like, got %d", count)
 	}
 
-	liked, count, err = svc.LikeSkill(skill.ID, 10)
+	liked, count, err = svc.LikeSkill(skill.ID, user.ID)
 	if err != nil {
 		t.Fatalf("second like failed: %v", err)
 	}
@@ -55,7 +71,7 @@ func TestLikeAndUnlikeSkill_ToggleAndCount(t *testing.T) {
 		t.Fatalf("expected likes_count stay 1 after duplicate like, got %d", count)
 	}
 
-	liked, count, err = svc.UnlikeSkill(skill.ID, 10)
+	liked, count, err = svc.UnlikeSkill(skill.ID, user.ID)
 	if err != nil {
 		t.Fatalf("first unlike failed: %v", err)
 	}
@@ -66,7 +82,7 @@ func TestLikeAndUnlikeSkill_ToggleAndCount(t *testing.T) {
 		t.Fatalf("expected likes_count=0 after unlike, got %d", count)
 	}
 
-	liked, count, err = svc.UnlikeSkill(skill.ID, 10)
+	liked, count, err = svc.UnlikeSkill(skill.ID, user.ID)
 	if err != nil {
 		t.Fatalf("second unlike failed: %v", err)
 	}
@@ -77,7 +93,7 @@ func TestLikeAndUnlikeSkill_ToggleAndCount(t *testing.T) {
 		t.Fatalf("expected likes_count stay 0 after duplicate unlike, got %d", count)
 	}
 
-	hasLiked, err := svc.HasUserLiked(skill.ID, 10)
+	hasLiked, err := svc.HasUserLiked(skill.ID, user.ID)
 	if err != nil {
 		t.Fatalf("has user liked failed: %v", err)
 	}
@@ -89,8 +105,9 @@ func TestLikeAndUnlikeSkill_ToggleAndCount(t *testing.T) {
 func TestUnlikeSkill_DoesNotGoBelowZero(t *testing.T) {
 	svc := newSkillServiceForLikesTest(t)
 	skill := createLikeTestSkill(t, svc, "Skill Like B")
+	user := createLikeTestUser(t, svc, 99)
 
-	liked, count, err := svc.UnlikeSkill(skill.ID, 99)
+	liked, count, err := svc.UnlikeSkill(skill.ID, user.ID)
 	if err != nil {
 		t.Fatalf("unlike without like failed: %v", err)
 	}

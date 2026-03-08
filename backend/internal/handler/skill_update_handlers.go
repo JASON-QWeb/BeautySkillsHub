@@ -78,6 +78,15 @@ func (h *SkillHandler) UpdateSkill(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "名称不能为空"})
 			return
 		}
+		if err := validateContentTextFields(contentTextFields{Name: name}); err != nil {
+			var fieldErr *fieldLengthError
+			if errors.As(err, &fieldErr) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": formatSkillFieldLengthError(fieldErr)})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "输入内容过长"})
+			return
+		}
 		if revision.Name != name {
 			changed = true
 		}
@@ -85,6 +94,15 @@ func (h *SkillHandler) UpdateSkill(c *gin.Context) {
 	}
 	if req.Description != nil {
 		description := strings.TrimSpace(*req.Description)
+		if err := validateContentTextFields(contentTextFields{Description: description}); err != nil {
+			var fieldErr *fieldLengthError
+			if errors.As(err, &fieldErr) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": formatSkillFieldLengthError(fieldErr)})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "输入内容过长"})
+			return
+		}
 		if revision.Description != description {
 			changed = true
 		}
@@ -133,6 +151,15 @@ func (h *SkillHandler) updateReviewedResourceFromMultipart(c *gin.Context, skill
 			c.JSON(http.StatusBadRequest, gin.H{"error": "名称不能为空"})
 			return
 		}
+		if err := validateContentTextFields(contentTextFields{Name: name}); err != nil {
+			var fieldErr *fieldLengthError
+			if errors.As(err, &fieldErr) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": formatSkillFieldLengthError(fieldErr)})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "输入内容过长"})
+			return
+		}
 		if revision.Name != name {
 			changed = true
 		}
@@ -141,6 +168,15 @@ func (h *SkillHandler) updateReviewedResourceFromMultipart(c *gin.Context, skill
 
 	if descriptionRaw, hasDescription := c.GetPostForm("description"); hasDescription {
 		description := strings.TrimSpace(descriptionRaw)
+		if err := validateContentTextFields(contentTextFields{Description: description}); err != nil {
+			var fieldErr *fieldLengthError
+			if errors.As(err, &fieldErr) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": formatSkillFieldLengthError(fieldErr)})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "输入内容过长"})
+			return
+		}
 		if revision.Description != description {
 			changed = true
 		}
@@ -149,6 +185,15 @@ func (h *SkillHandler) updateReviewedResourceFromMultipart(c *gin.Context, skill
 
 	if tagsRaw, hasTags := c.GetPostForm("tags"); hasTags {
 		tags := normalizeTags(tagsRaw)
+		if err := validateContentTextFields(contentTextFields{Tags: tags}); err != nil {
+			var fieldErr *fieldLengthError
+			if errors.As(err, &fieldErr) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": formatSkillFieldLengthError(fieldErr)})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "输入内容过长"})
+			return
+		}
 		if revision.Tags != tags {
 			changed = true
 		}

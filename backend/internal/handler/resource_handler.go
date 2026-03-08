@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -221,7 +222,9 @@ func (h *ResourceHandler) Download(c *gin.Context) {
 		return
 	}
 
-	h.skillSvc.IncrementDownload(uint(id))
+	if err := incrementDownloadCounter(h.skillSvc, uint(id)); err != nil {
+		log.Printf("download count increment failed for resource %d: %v", id, err)
+	}
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", skill.FileName))
 	c.File(skill.FilePath)
 }
@@ -309,6 +312,22 @@ func (h *ResourceHandler) Upload(c *gin.Context) {
 	author := normalizeSkillAuthor(username, c.PostForm("author"))
 	uploadMode := strings.ToLower(strings.TrimSpace(c.DefaultPostForm("upload_mode", "file")))
 	sourceURL := strings.TrimSpace(c.PostForm("source_url"))
+
+	if err := validateContentTextFields(contentTextFields{
+		Name:        name,
+		Description: description,
+		Tags:        tags,
+		Author:      author,
+		SourceURL:   sourceURL,
+	}); err != nil {
+		var fieldErr *fieldLengthError
+		if errors.As(err, &fieldErr) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": formatResourceFieldLengthError(fieldErr)})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "content exceeds maximum length"})
+		return
+	}
 
 	if name == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
@@ -523,10 +542,29 @@ func (h *ResourceHandler) Update(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "name cannot be empty"})
 			return
 		}
+		if err := validateContentTextFields(contentTextFields{Name: name}); err != nil {
+			var fieldErr *fieldLengthError
+			if errors.As(err, &fieldErr) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": formatResourceFieldLengthError(fieldErr)})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "content exceeds maximum length"})
+			return
+		}
 		skill.Name = name
 	}
 	if req.Description != nil {
-		skill.Description = strings.TrimSpace(*req.Description)
+		description := strings.TrimSpace(*req.Description)
+		if err := validateContentTextFields(contentTextFields{Description: description}); err != nil {
+			var fieldErr *fieldLengthError
+			if errors.As(err, &fieldErr) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": formatResourceFieldLengthError(fieldErr)})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "content exceeds maximum length"})
+			return
+		}
+		skill.Description = description
 	}
 
 	if err := h.skillSvc.UpdateSkill(skill); err != nil {
@@ -650,6 +688,15 @@ func (h *ResourceHandler) updateFromMultipart(c *gin.Context, skill *model.Skill
 			c.JSON(http.StatusBadRequest, gin.H{"error": "name cannot be empty"})
 			return
 		}
+		if err := validateContentTextFields(contentTextFields{Name: name}); err != nil {
+			var fieldErr *fieldLengthError
+			if errors.As(err, &fieldErr) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": formatResourceFieldLengthError(fieldErr)})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "content exceeds maximum length"})
+			return
+		}
 		if skill.Name != name {
 			changed = true
 		}
@@ -657,6 +704,15 @@ func (h *ResourceHandler) updateFromMultipart(c *gin.Context, skill *model.Skill
 	}
 	if hasDescription {
 		description := strings.TrimSpace(descriptionRaw)
+		if err := validateContentTextFields(contentTextFields{Description: description}); err != nil {
+			var fieldErr *fieldLengthError
+			if errors.As(err, &fieldErr) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": formatResourceFieldLengthError(fieldErr)})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "content exceeds maximum length"})
+			return
+		}
 		if skill.Description != description {
 			changed = true
 		}
@@ -664,6 +720,15 @@ func (h *ResourceHandler) updateFromMultipart(c *gin.Context, skill *model.Skill
 	}
 	if hasTags {
 		tags := normalizeTags(tagsRaw)
+		if err := validateContentTextFields(contentTextFields{Tags: tags}); err != nil {
+			var fieldErr *fieldLengthError
+			if errors.As(err, &fieldErr) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": formatResourceFieldLengthError(fieldErr)})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "content exceeds maximum length"})
+			return
+		}
 		if skill.Tags != tags {
 			changed = true
 		}
@@ -671,6 +736,15 @@ func (h *ResourceHandler) updateFromMultipart(c *gin.Context, skill *model.Skill
 	}
 	if hasSourceURL {
 		sourceURL := strings.TrimSpace(sourceRaw)
+		if err := validateContentTextFields(contentTextFields{SourceURL: sourceURL}); err != nil {
+			var fieldErr *fieldLengthError
+			if errors.As(err, &fieldErr) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": formatResourceFieldLengthError(fieldErr)})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "content exceeds maximum length"})
+			return
+		}
 		if err := validateSourceURL(sourceURL); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid source_url"})
 			return
