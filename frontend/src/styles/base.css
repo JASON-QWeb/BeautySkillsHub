@@ -104,11 +104,20 @@ a {
 .btn-primary {
   color: #fff;
   background: var(--accent-gradient);
-  box-shadow: 0 10px 22px rgba(84, 127, 240, 0.3);
+  box-shadow: 0 10px 22px rgba(31, 42, 68, 0.22);
 }
 
 .btn-primary:hover:not(:disabled) {
   transform: translateY(-1px);
+  box-shadow: 0 14px 24px rgba(31, 42, 68, 0.3);
+}
+
+[data-theme="dark"] .btn-primary {
+  background: linear-gradient(135deg, #547ff0, #7653ea);
+  box-shadow: 0 10px 22px rgba(84, 127, 240, 0.3);
+}
+
+[data-theme="dark"] .btn-primary:hover:not(:disabled) {
   box-shadow: 0 14px 24px rgba(84, 127, 240, 0.36);
 }
 

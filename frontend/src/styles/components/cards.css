@@ -8,24 +8,25 @@
   transition: transform var(--transition-fast), box-shadow var(--transition-fast), border-color var(--transition-fast);
 }
 
-.skill-card.pending-review {
-  border-color: rgba(243, 198, 20, 0.44);
-  box-shadow: 0 8px 24px rgba(243, 198, 20, 0.12);
+.skill-card:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.10);
+  border-color: var(--border-active);
 }
 
-.skill-card:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--shadow-md);
-  border-color: var(--border-hover);
+.skill-card:hover .skill-card-thumb {
+  filter: brightness(1.03);
 }
 
 .skill-card-thumb {
   width: calc(100% - 20px);
-  margin: 10px 10px 0;
+  margin: 10px auto 0;
   height: 190px;
   object-fit: cover;
   border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, 0.08);
+  display: block;
+  transition: filter var(--transition-fast);
 }
 
 .skill-card-thumb-fallback {
@@ -73,18 +74,22 @@
   top: 20px;
   right: 20px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.24);
-  color: #f5f7ff;
   font-size: 0.78rem;
   font-weight: 700;
   padding: 6px 9px;
   backdrop-filter: blur(8px);
 }
 
-.skill-card.pending-review .skill-card-publish-tag {
-  background: rgba(243, 198, 20, 0.2);
-  border: 1px solid rgba(243, 198, 20, 0.44);
-  color: #f4f8ff;
+/* Published: green-tinted tag */
+.skill-card-publish-tag.published {
+  background: rgba(35, 178, 109, 0.72);
+  color: #fff;
+}
+
+/* Pending review: amber/yellow tag */
+.skill-card-publish-tag.pending {
+  background: rgba(243, 198, 20, 0.82);
+  color: #1f2a44;
 }
 
 .skill-card-body {
@@ -236,34 +241,35 @@
   flex-shrink: 0;
 }
 
+/* Light mode: neutral/monochrome metric pills */
 .metric-download {
-  color: #21aa72;
-  background: rgba(33, 170, 114, 0.12);
-  border-color: rgba(33, 170, 114, 0.22);
+  color: #3d4f65;
+  background: rgba(31, 42, 68, 0.06);
+  border-color: rgba(31, 42, 68, 0.12);
   padding-right: 10px;
 }
 
 .metric-star {
-  color: #dfb10d;
+  color: #9a8322;
 }
 
 .metric-favorite-btn {
-  border-color: rgba(233, 113, 143, 0.18);
-  background: rgba(233, 113, 143, 0.08);
-  color: #afbccf;
+  border-color: rgba(31, 42, 68, 0.10);
+  background: rgba(31, 42, 68, 0.04);
+  color: #8b97a8;
   cursor: pointer;
   transition: all var(--transition-fast);
 }
 
 .metric-favorite-btn:hover:not(:disabled) {
-  background: rgba(239, 71, 111, 0.16);
+  background: rgba(239, 71, 111, 0.10);
   color: #ef476f;
 }
 
 .metric-favorite-btn.favorited {
   color: #ef476f;
-  border-color: rgba(239, 71, 111, 0.28);
-  background: rgba(239, 71, 111, 0.14);
+  border-color: rgba(239, 71, 111, 0.22);
+  background: rgba(239, 71, 111, 0.08);
 }
 
 .metric-favorite-btn:disabled {
@@ -274,22 +280,22 @@
 .metric-star-btn {
   width: 28px;
   padding: 0;
-  border-color: rgba(223, 177, 13, 0.22);
-  background: rgba(223, 177, 13, 0.1);
-  color: #afbccf;
+  border-color: rgba(31, 42, 68, 0.10);
+  background: rgba(31, 42, 68, 0.04);
+  color: #8b97a8;
   cursor: pointer;
   transition: all var(--transition-fast);
 }
 
 .metric-star-btn:hover:not(:disabled) {
-  background: rgba(223, 177, 13, 0.2);
-  color: #dfb10d;
+  background: rgba(223, 177, 13, 0.12);
+  color: #b59312;
 }
 
 .metric-star-btn.liked {
-  color: #dfb10d;
-  border-color: rgba(223, 177, 13, 0.34);
-  background: rgba(223, 177, 13, 0.2);
+  color: #b59312;
+  border-color: rgba(181, 147, 18, 0.26);
+  background: rgba(223, 177, 13, 0.10);
 }
 
 .metric-star-btn:disabled {
@@ -297,9 +303,9 @@
   cursor: default;
 }
 
-[data-theme="dark"] .skill-card.pending-review {
-  border-color: rgba(248, 204, 42, 0.5);
-  box-shadow: 0 12px 30px rgba(248, 204, 42, 0.18);
+/* Dark mode overrides */
+[data-theme="dark"] .skill-card:hover {
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
 }
 
 [data-theme="dark"] .skill-card-edit-btn {
@@ -310,4 +316,38 @@
   color: #71deb0;
   background: rgba(49, 204, 133, 0.16);
   border-color: rgba(49, 204, 133, 0.26);
+}
+
+[data-theme="dark"] .metric-favorite-btn {
+  border-color: rgba(233, 113, 143, 0.18);
+  background: rgba(233, 113, 143, 0.08);
+  color: #afbccf;
+}
+
+[data-theme="dark"] .metric-favorite-btn:hover:not(:disabled) {
+  background: rgba(239, 71, 111, 0.16);
+  color: #ef476f;
+}
+
+[data-theme="dark"] .metric-favorite-btn.favorited {
+  color: #ef476f;
+  border-color: rgba(239, 71, 111, 0.28);
+  background: rgba(239, 71, 111, 0.14);
+}
+
+[data-theme="dark"] .metric-star-btn {
+  border-color: rgba(223, 177, 13, 0.22);
+  background: rgba(223, 177, 13, 0.1);
+  color: #afbccf;
+}
+
+[data-theme="dark"] .metric-star-btn:hover:not(:disabled) {
+  background: rgba(223, 177, 13, 0.2);
+  color: #dfb10d;
+}
+
+[data-theme="dark"] .metric-star-btn.liked {
+  color: #dfb10d;
+  border-color: rgba(223, 177, 13, 0.34);
+  background: rgba(223, 177, 13, 0.2);
 }

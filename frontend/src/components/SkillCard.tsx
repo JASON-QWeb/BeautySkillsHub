@@ -11,11 +11,11 @@ interface Props {
 }
 
 const THUMB_GRADIENTS = [
-    'linear-gradient(135deg, #4f83e8 0%, #5d63dc 100%)',
-    'linear-gradient(135deg, #36c88f 0%, #0f9467 100%)',
-    'linear-gradient(135deg, #38bdf8 0%, #3b82f6 100%)',
+    'linear-gradient(135deg, #1f2a44 0%, #2d3a52 100%)',
+    'linear-gradient(135deg, #3d4f65 0%, #2a3a4e 100%)',
+    'linear-gradient(135deg, #c4a24e 0%, #9a8322 100%)',
     'linear-gradient(135deg, #374151 0%, #1f2937 100%)',
-    'linear-gradient(135deg, #f97316 0%, #ef4444 100%)',
+    'linear-gradient(135deg, #4a4a4a 0%, #2c2c2c 100%)',
 ]
 
 function formatDownload(num: number) {
@@ -115,7 +115,7 @@ function SkillCard({ skill, onFavoriteChange }: Props) {
 
     return (
         <article
-            className={`skill-card glass-card ${isPendingReview ? 'pending-review' : ''}`}
+            className="skill-card glass-card"
             onClick={(e) => {
                 const target = e.target as HTMLElement
                 if (target.closest('button')) return
@@ -142,7 +142,7 @@ function SkillCard({ skill, onFavoriteChange }: Props) {
                 </div>
             )}
 
-            <div className="skill-card-publish-tag">
+            <div className={`skill-card-publish-tag ${isPublished ? 'published' : 'pending'}`}>
                 {isPublished ? t('skillCard.published') : t('skillCard.pendingReview')}
             </div>
 
@@ -167,17 +167,19 @@ function SkillCard({ skill, onFavoriteChange }: Props) {
                 </div>
 
                 <h3 className="skill-card-title">{skill.name}</h3>
-                
-                {skill.tags && (
-                    <div className="skill-card-tags">
-                        {skill.tags.split(',').slice(0, 3).map(tag => (
-                            <span key={tag} className="skill-card-tag">{tag.trim()}</span>
-                        ))}
-                        {skill.tags.split(',').length > 3 && (
-                            <span className="skill-card-tag">+{skill.tags.split(',').length - 3}</span>
-                        )}
-                    </div>
-                )}
+
+                <div className="skill-card-tags">
+                    {skill.tags ? (
+                        <>
+                            {skill.tags.split(',').slice(0, 3).map(tag => (
+                                <span key={tag} className="skill-card-tag">{tag.trim()}</span>
+                            ))}
+                            {skill.tags.split(',').length > 3 && (
+                                <span className="skill-card-tag">+{skill.tags.split(',').length - 3}</span>
+                            )}
+                        </>
+                    ) : null}
+                </div>
 
                 <div className="skill-card-footer">
                     <div className="skill-card-author-wrap">

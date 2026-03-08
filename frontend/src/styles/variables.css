@@ -13,9 +13,9 @@
   --text-muted: #7f8ea6;
 
   --accent-primary: #f3c614;
-  --accent-secondary: #2e67ff;
-  --accent-gradient: linear-gradient(135deg, #4f83e8, #5e5fda);
-  --accent-glow: rgba(95, 103, 220, 0.2);
+  --accent-secondary: #1f2a44;
+  --accent-gradient: linear-gradient(135deg, #1f2a44, #2d3a52);
+  --accent-glow: rgba(31, 42, 68, 0.15);
 
   --success: #23b26d;
   --warning: #f0b90b;
@@ -36,7 +36,7 @@
   --shadow-sm: 0 4px 14px rgba(55, 74, 103, 0.08);
   --shadow-md: 0 12px 32px rgba(36, 52, 75, 0.1);
   --shadow-lg: 0 22px 48px rgba(31, 44, 65, 0.15);
-  --shadow-glow: 0 0 24px rgba(95, 103, 220, 0.26);
+  --shadow-glow: 0 0 24px rgba(31, 42, 68, 0.18);
 
   --card-glass: rgba(255, 255, 255, 0.74);
   --card-glass-border: rgba(255, 255, 255, 0.62);
@@ -50,7 +50,7 @@
 
   --input-bg: rgba(249, 250, 252, 0.88);
   --input-border: rgba(112, 130, 161, 0.22);
-  --input-focus-border: #4f83e8;
+  --input-focus-border: #1f2a44;
 
   --login-left-bg: #f3f4f6;
   --login-left-pattern-1: rgba(17, 24, 39, 0.08);

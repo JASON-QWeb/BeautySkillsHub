@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import LoginModal from '../../components/LoginModal'
 import RightSidebar from '../../components/RightSidebar'
@@ -35,72 +35,74 @@ function HomePage() {
     const [search, setSearch] = useState('')
     const [page, setPage] = useState(1)
     const [total, setTotal] = useState(0)
-    const [overviewComposition, setOverviewComposition] = useState({
-        skill: 0,
-        rules: 0,
-        mcp: 0,
-        tools: 0,
-    })
     const [loginOpen, setLoginOpen] = useState(false)
     const [animKey, setAnimKey] = useState(0)
+    const [filterTag, setFilterTag] = useState('')
+    const [filterOpen, setFilterOpen] = useState(false)
+    const [allTags, setAllTags] = useState<string[]>([])
+    const filterRef = useRef<HTMLDivElement>(null)
 
     const pageSize = 20
 
     useEffect(() => {
         setSearch('')
         setPage(1)
+        setFilterTag('')
         setAnimKey(prev => prev + 1)
     }, [normalizedType])
+
+    // Load available tags for filter
+    useEffect(() => {
+        const loadTags = async () => {
+            try {
+                const data = await fetchSkills('', 1, 100, '', resourceTypeFilter)
+                const counts: Record<string, number> = {}
+                for (const skill of data.skills || []) {
+                    if (skill.tags) {
+                        for (const tag of skill.tags.split(',')) {
+                            const t = tag.trim().toLowerCase()
+                            if (t) counts[t] = (counts[t] || 0) + 1
+                        }
+                    }
+                }
+                const sorted = Object.entries(counts)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([tag]) => tag)
+                setAllTags(sorted)
+            } catch {
+                setAllTags([])
+            }
+        }
+        loadTags()
+    }, [resourceTypeFilter])
+
+    // Close filter dropdown on outside click
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (filterRef.current && !filterRef.current.contains(e.target as Node)) {
+                setFilterOpen(false)
+            }
+        }
+        if (filterOpen) document.addEventListener('mousedown', handler)
+        return () => document.removeEventListener('mousedown', handler)
+    }, [filterOpen])
 
     useEffect(() => {
         const loadSummary = async () => {
             try {
-                if (isOverview) {
-                    const [allSummary, skillSummary, rulesSummary, mcpSummary, toolsSummary] = await Promise.all([
-                        fetchSkillSummary(''),
-                        fetchSkillSummary('skill'),
-                        fetchSkillSummary('rules'),
-                        fetchSkillSummary('mcp'),
-                        fetchSkillSummary('tools'),
-                    ])
-                    setSummary({
-                        total: allSummary.total || 0,
-                        yesterday_new: allSummary.yesterday_new || 0,
-                    })
-                    setOverviewComposition({
-                        skill: skillSummary.total || 0,
-                        rules: rulesSummary.total || 0,
-                        mcp: mcpSummary.total || 0,
-                        tools: toolsSummary.total || 0,
-                    })
-                    return
-                }
-
                 const data = await fetchSkillSummary(resourceTypeFilter)
                 setSummary({
                     total: data.total || 0,
                     yesterday_new: data.yesterday_new || 0,
                 })
-                setOverviewComposition({
-                    skill: 0,
-                    rules: 0,
-                    mcp: 0,
-                    tools: 0,
-                })
             } catch (err) {
                 console.error('Failed to load summary:', err)
                 setSummary({ total: 0, yesterday_new: 0 })
-                setOverviewComposition({
-                    skill: 0,
-                    rules: 0,
-                    mcp: 0,
-                    tools: 0,
-                })
             }
         }
 
         loadSummary()
-    }, [isOverview, resourceTypeFilter])
+    }, [resourceTypeFilter])
 
     const loadSkills = useCallback(async () => {
         setLoading(true)
@@ -123,6 +125,13 @@ function HomePage() {
 
     const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
+    const filteredSkills = useMemo(() => {
+        if (!filterTag) return skills
+        return skills.filter(skill =>
+            skill.tags?.split(',').some(t => t.trim().toLowerCase() === filterTag)
+        )
+    }, [skills, filterTag])
+
     const totalDownloads = useMemo(() => {
         return skills.reduce((sum, skill) => sum + (skill.downloads || 0), 0)
     }, [skills])
@@ -131,7 +140,8 @@ function HomePage() {
 
     const handleUpload = () => {
         if (user) {
-            navigate(`/resource/${normalizedType}/upload`)
+            const uploadType = isOverview ? 'skill' : normalizedType
+            navigate(`/resource/${uploadType}/upload`)
             return
         }
         setLoginOpen(true)
@@ -162,40 +172,19 @@ function HomePage() {
                         </div>
                     </div>
 
-                    {isOverview ? (
-                        <div className="home-stats home-stats-overview">
-                            <div className="home-stat-item">
-                                <p className="home-stat-value">{overviewComposition.skill.toLocaleString()}</p>
-                                <p className="home-stat-label">{t('nav.skills')}</p>
-                            </div>
-                            <div className="home-stat-item">
-                                <p className="home-stat-value">{overviewComposition.rules.toLocaleString()}</p>
-                                <p className="home-stat-label">{t('nav.rules')}</p>
-                            </div>
-                            <div className="home-stat-item">
-                                <p className="home-stat-value">{overviewComposition.mcp.toLocaleString()}</p>
-                                <p className="home-stat-label">{t('nav.mcp')}</p>
-                            </div>
-                            <div className="home-stat-item">
-                                <p className="home-stat-value">{overviewComposition.tools.toLocaleString()}</p>
-                                <p className="home-stat-label">{t('nav.tools')}</p>
-                            </div>
+                    <div className="home-stats">
+                        <div className="home-stat-item">
+                            <p className="home-stat-value">{total.toLocaleString()}</p>
+                            <p className="home-stat-label">{t('home.totalItems')}</p>
                         </div>
-                    ) : (
-                        <div className="home-stats">
-                            <div className="home-stat-item">
-                                <p className="home-stat-value">{total.toLocaleString()}</p>
-                                <p className="home-stat-label">{t('home.totalItems')}</p>
-                            </div>
-                            <div className="home-stat-item">
-                                <p className="home-stat-value">{totalDownloads >= 1000 ? `${(totalDownloads / 1000).toFixed(1)}K` : totalDownloads}</p>
-                                <p className="home-stat-label">{t('home.downloads')}</p>
-                            </div>
-                            <button className="home-upload-cta" onClick={handleUpload}>
-                                {t('home.uploadAsset', { label: info.label })}
-                            </button>
+                        <div className="home-stat-item">
+                            <p className="home-stat-value">{totalDownloads >= 1000 ? `${(totalDownloads / 1000).toFixed(1)}K` : totalDownloads}</p>
+                            <p className="home-stat-label">{t('home.downloads')}</p>
                         </div>
-                    )}
+                        <button className="home-upload-cta" onClick={handleUpload}>
+                            {isOverview ? t('home.uploadResource') : t('home.uploadAsset', { label: info.label })}
+                        </button>
+                    </div>
                 </header>
 
                 <div className="home-toolbar glass-card">
@@ -213,9 +202,39 @@ function HomePage() {
                         />
                     </label>
 
-                    <button className="home-filter-btn" type="button">
-                        ⌁ {t('home.filters')}
-                    </button>
+                    <div className="home-filter-wrap" ref={filterRef}>
+                        <button
+                            className={`home-filter-btn ${filterOpen ? 'active' : ''} ${filterTag ? 'has-filter' : ''}`}
+                            type="button"
+                            onClick={() => setFilterOpen(prev => !prev)}
+                        >
+                            ⌁ {filterTag || t('home.filters')}
+                        </button>
+                        {filterOpen && (
+                            <div className="home-filter-dropdown glass-card">
+                                <button
+                                    type="button"
+                                    className={`home-filter-option ${!filterTag ? 'active' : ''}`}
+                                    onClick={() => { setFilterTag(''); setFilterOpen(false); setPage(1) }}
+                                >
+                                    {t('home.filters')} (All)
+                                </button>
+                                {allTags.map(tag => (
+                                    <button
+                                        key={tag}
+                                        type="button"
+                                        className={`home-filter-option ${filterTag === tag ? 'active' : ''}`}
+                                        onClick={() => { setFilterTag(tag); setFilterOpen(false); setPage(1) }}
+                                    >
+                                        {tag}
+                                    </button>
+                                ))}
+                                {allTags.length === 0 && (
+                                    <div className="home-filter-empty">No tags</div>
+                                )}
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 {loading ? (
@@ -223,7 +242,7 @@ function HomePage() {
                         <div className="loading-spinner" style={{ width: 40, height: 40 }} />
                         <p>{t('common.loadingResources')}</p>
                     </div>
-                ) : skills.length === 0 ? (
+                ) : filteredSkills.length === 0 ? (
                     <div className="empty-state">
                         <div className="icon">⌂</div>
                         <p>{t('home.noResources')}</p>
@@ -231,7 +250,7 @@ function HomePage() {
                 ) : (
                     <>
                         <div className="skills-grid" key={animKey}>
-                            {skills.map((skill, idx) => (
+                            {filteredSkills.map((skill, idx) => (
                                 <div
                                     key={skill.id}
                                     className="skill-card-enter"

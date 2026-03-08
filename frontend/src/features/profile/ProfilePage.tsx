@@ -3,6 +3,7 @@ import SkillCard from '../../components/SkillCard'
 import { useAuth } from '../../contexts/AuthContext'
 import { useI18n } from '../../i18n/I18nProvider'
 import { Skill, fetchMyFavorites, fetchSkills } from '../../services/api'
+import { buildProfileActivityAction } from './profileActivity'
 
 type TabKey = 'uploads' | 'saved' | 'activity'
 
@@ -146,7 +147,7 @@ function ProfilePage() {
     const activities = useMemo(() => {
         const uploads = authoredSkills.map(skill => ({
             id: `up-${skill.id}`,
-            action: t('profile.publishedResource'),
+            action: buildProfileActivityAction(t, 'published', skill.resource_type),
             target: skill.name,
             timestamp: new Date(skill.created_at).getTime(),
             time: new Date(skill.created_at).toLocaleDateString(language === 'zh' ? 'zh-CN' : 'en-US'),
@@ -154,7 +155,11 @@ function ProfilePage() {
 
         const reviews = reviewedSkills.map(skill => ({
             id: `rev-${skill.id}`,
-            action: skill.human_review_status === 'approved' ? t('profile.approvedResource') : t('profile.reviewedResource'),
+            action: buildProfileActivityAction(
+                t,
+                skill.human_review_status === 'approved' ? 'approved' : 'reviewed',
+                skill.resource_type,
+            ),
             target: skill.name,
             timestamp: new Date(skill.human_reviewed_at || skill.updated_at).getTime(),
             time: new Date(skill.human_reviewed_at || skill.updated_at).toLocaleDateString(language === 'zh' ? 'zh-CN' : 'en-US'),

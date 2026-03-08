@@ -50,9 +50,13 @@ export async function fetchSkills(
     let basePath: string
     if (resourceType) {
         basePath = getResourcePath(resourceType)
+        // For 'skill' type, the path is also /skills (same as all),
+        // so we need an explicit filter param to exclude other types.
+        if (resourceType === 'skill') {
+            params.set('resource_type', 'skill')
+        }
     } else {
         basePath = '/skills'
-        // No resource_type param needed - returns all types
     }
 
     const res = await fetch(`${API_BASE}${basePath}?${params}`, {

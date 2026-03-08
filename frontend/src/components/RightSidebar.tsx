@@ -8,19 +8,8 @@ interface RightSidebarProps {
     resourceType?: string
 }
 
-type CompositionCounts = {
-    skill: number
-    mcp: number
-    tools: number
-    rules: number
-}
-
-const defaultComposition: CompositionCounts = {
-    skill: 0,
-    mcp: 0,
-    tools: 0,
-    rules: 0,
-}
+const TAG_COLORS = ['#1f2a44', '#f3c614', '#8b8b8b', '#c4a24e']
+const TAG_COLORS_DARK = ['#4f83e8', '#35d388', '#f3c614', '#7f98dd']
 
 function timeAgo(value: string, language: Language) {
     const date = new Date(value)
@@ -45,7 +34,7 @@ function RightSidebar({ resourceType = '' }: RightSidebarProps) {
     const { language, t } = useI18n()
     const [trending, setTrending] = useState<Skill[]>([])
     const [recent, setRecent] = useState<Skill[]>([])
-    const [composition, setComposition] = useState<CompositionCounts>(defaultComposition)
+    const [tagCounts, setTagCounts] = useState<Record<string, number>>({})
 
     useEffect(() => {
         const load = async () => {
@@ -67,47 +56,55 @@ function RightSidebar({ resourceType = '' }: RightSidebarProps) {
     }, [resourceType])
 
     useEffect(() => {
-        const loadComposition = async () => {
+        const loadTags = async () => {
             try {
-                const [skillRes, mcpRes, toolsRes, rulesRes] = await Promise.all([
-                    fetchSkills('', 1, 1, '', 'skill'),
-                    fetchSkills('', 1, 1, '', 'mcp'),
-                    fetchSkills('', 1, 1, '', 'tools'),
-                    fetchSkills('', 1, 1, '', 'rules'),
-                ])
-
-                setComposition({
-                    skill: skillRes.total || 0,
-                    mcp: mcpRes.total || 0,
-                    tools: toolsRes.total || 0,
-                    rules: rulesRes.total || 0,
-                })
+                const data = await fetchSkills('', 1, 100, '', resourceType)
+                const counts: Record<string, number> = {}
+                for (const skill of data.skills || []) {
+                    if (skill.tags) {
+                        for (const tag of skill.tags.split(',')) {
+                            const normalized = tag.trim().toLowerCase()
+                            if (normalized) {
+                                counts[normalized] = (counts[normalized] || 0) + 1
+                            }
+                        }
+                    }
+                }
+                setTagCounts(counts)
             } catch (err) {
-                console.error('Failed to load composition data', err)
-                setComposition(defaultComposition)
+                console.error('Failed to load tag composition', err)
+                setTagCounts({})
             }
         }
 
-        loadComposition()
-    }, [])
+        loadTags()
+    }, [resourceType])
 
-    const totalComposition = useMemo(() => {
-        return composition.skill + composition.mcp + composition.tools + composition.rules
-    }, [composition])
+    const topTags = useMemo(() => {
+        return Object.entries(tagCounts)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 4)
+    }, [tagCounts])
 
-    const compositionStops = useMemo(() => {
-        const total = totalComposition || 1
-        const skillPct = (composition.skill / total) * 100
-        const mcpPct = (composition.mcp / total) * 100
-        const rulesPct = (composition.rules / total) * 100
-        const toolsPct = (composition.tools / total) * 100
+    const totalTagCount = useMemo(() => {
+        return Object.values(tagCounts).reduce((a, b) => a + b, 0)
+    }, [tagCounts])
 
-        const s1 = skillPct
-        const s2 = s1 + mcpPct
-        const s3 = s2 + rulesPct
-        const s4 = s3 + toolsPct
-        return { s1, s2, s3, s4 }
-    }, [composition, totalComposition])
+    const tagStops = useMemo(() => {
+        const total = totalTagCount || 1
+        const stops: number[] = []
+        let cumulative = 0
+        for (const [, count] of topTags) {
+            cumulative += (count / total) * 100
+            stops.push(cumulative)
+        }
+        // Fill remaining stops if < 4 tags
+        while (stops.length < 4) stops.push(cumulative)
+        return stops
+    }, [topTags, totalTagCount])
+
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
+    const colors = isDark ? TAG_COLORS_DARK : TAG_COLORS
 
     return (
         <aside className="right-sidebar">
@@ -162,36 +159,37 @@ function RightSidebar({ resourceType = '' }: RightSidebarProps) {
             <section className="sidebar-composition glass-card">
                 <div>
                     <p className="comp-label">{t('sidebar.totalComposition')}</p>
-                    <p className="comp-value">{totalComposition.toLocaleString()}</p>
+                    <p className="comp-value">{totalTagCount.toLocaleString()}</p>
                     <p className="comp-note">{t('sidebar.skillsVsTools')}</p>
                     <div className="comp-breakdown">
-                        <div className="comp-breakdown-item">
-                            <span>{t('nav.skills')}</span>
-                            <strong>{composition.skill}</strong>
-                        </div>
-                        <div className="comp-breakdown-item">
-                            <span>{t('nav.mcp')}</span>
-                            <strong>{composition.mcp}</strong>
-                        </div>
-                        <div className="comp-breakdown-item">
-                            <span>{t('nav.tools')}</span>
-                            <strong>{composition.tools}</strong>
-                        </div>
-                        <div className="comp-breakdown-item">
-                            <span>{t('nav.rules')}</span>
-                            <strong>{composition.rules}</strong>
-                        </div>
+                        {topTags.map(([tag, count], idx) => (
+                            <div key={tag} className="comp-breakdown-item">
+                                <span>
+                                    <span className="comp-color-dot" style={{ background: colors[idx] }} />
+                                    {tag}
+                                </span>
+                                <strong>{count}</strong>
+                            </div>
+                        ))}
+                        {topTags.length === 0 && (
+                            <div className="comp-breakdown-item">
+                                <span>--</span>
+                                <strong>0</strong>
+                            </div>
+                        )}
                     </div>
                 </div>
                 <div
                     className="comp-ring multi"
                     style={{
-                        background: `conic-gradient(
-                          #4f83e8 0% ${compositionStops.s1}%,
-                          #35d388 ${compositionStops.s1}% ${compositionStops.s2}%,
-                          #f3c614 ${compositionStops.s2}% ${compositionStops.s3}%,
-                          #7f98dd ${compositionStops.s3}% ${compositionStops.s4}%
-                        )`,
+                        background: topTags.length > 0
+                            ? `conic-gradient(
+                              ${colors[0]} 0% ${tagStops[0]}%${topTags.length > 1 ? `,
+                              ${colors[1]} ${tagStops[0]}% ${tagStops[1]}%` : ''}${topTags.length > 2 ? `,
+                              ${colors[2]} ${tagStops[1]}% ${tagStops[2]}%` : ''}${topTags.length > 3 ? `,
+                              ${colors[3]} ${tagStops[2]}% ${tagStops[3]}%` : ''}
+                            )`
+                            : 'var(--border)',
                     }}
                 >
                     <span>Hub</span>

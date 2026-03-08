@@ -130,7 +130,11 @@ export function SkillsInstallModal({ isOpen, onClose }: SkillsInstallModalProps)
                     </section>
 
                     <section className="skills-install-step">
-                        <h3>3. 再阅读 NPX_SKILLS_COMMANDS.md（更新与检查）</h3>
+                        <h3>3. 更新与维护已安装的技能</h3>
+                        <p className="skills-install-tip" style={{ marginTop: 0, marginBottom: 12 }}>
+                            技能安装后，你可以通过以下命令随时保持它们处于最新状态：
+                        </p>
+                        
                         <div className="skills-install-command-row">
                             <code>{checkCommand}</code>
                             <button
@@ -140,6 +144,10 @@ export function SkillsInstallModal({ isOpen, onClose }: SkillsInstallModalProps)
                                 {copiedKey === 'check' ? '已复制' : '复制'}
                             </button>
                         </div>
+                        <p className="skills-install-tip" style={{ marginTop: 6, marginBottom: 16, fontSize: '0.85rem' }}>
+                            <strong>只读检查：</strong>扫描所有已安装技能，列出哪些有新版本可供更新，但不会改动任何文件。
+                        </p>
+
                         <div className="skills-install-command-row">
                             <code>{updateCommand}</code>
                             <button
@@ -149,13 +157,13 @@ export function SkillsInstallModal({ isOpen, onClose }: SkillsInstallModalProps)
                                 {copiedKey === 'update' ? '已复制' : '复制'}
                             </button>
                         </div>
-                        <ul className="skills-install-usage-list">
-                            <li><strong>check 用法：</strong>只检查哪些已安装技能有可更新版本，不会执行安装替换。</li>
-                            <li><strong>update 用法：</strong>将检测到有变化的技能更新到最新版本，并同步更新锁文件记录。</li>
-                        </ul>
-                        <p className="skills-install-tip">
-                            先执行 <code>check</code> 查看可更新项，再执行 <code>update</code> 拉取最新技能版本。
+                        <p className="skills-install-tip" style={{ marginTop: 6, marginBottom: 0, fontSize: '0.85rem' }}>
+                            <strong>执行更新：</strong>将检测到有变化的技能拉取并替换为最新版本，并自动同步更新锁文件记录。
                         </p>
+                        
+                        <div style={{ marginTop: 16, padding: '10px 14px', background: 'var(--accent-glow)', borderRadius: '10px', fontSize: '0.88rem', color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
+                            💡 <strong>推荐流程：</strong>先执行 <code>check</code> 预览可更新项，确认无误后再执行 <code>update</code> 完成批量升级。
+                        </div>
                     </section>
                 </div>
             </div>

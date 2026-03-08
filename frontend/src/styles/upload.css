@@ -100,11 +100,11 @@
 }
 
 .step-connector.active {
-  background: linear-gradient(90deg, #f3c614, #8ba3de);
+  background: linear-gradient(90deg, #f3c614, #1f2a44);
 }
 
 .step-connector.active::after {
-  color: #7f98dd;
+  color: #1f2a44;
 }
 
 .upload-flow-layout {
@@ -306,7 +306,7 @@
 .upload-dropzone em {
   margin-top: 5px;
   font-size: 0.88rem;
-  color: #3170db;
+  color: #1f2a44;
   font-style: normal;
   font-weight: 700;
 }
@@ -407,7 +407,7 @@
 .thumb-crop-control em {
   justify-self: end;
   font-style: normal;
-  color: #2d57b6;
+  color: #1f2a44;
   font-size: 0.82rem;
   font-weight: 700;
 }
@@ -445,22 +445,23 @@
   color: inherit;
 }
 
+/* Light mode: distinct background colors per status */
 .review-status.pending {
-  background: rgba(88, 126, 231, 0.1);
-  border: 1px solid rgba(88, 126, 231, 0.28);
-  color: #3159b8;
+  background: rgba(243, 198, 20, 0.10);
+  border: 1px solid rgba(243, 198, 20, 0.30);
+  color: #5a4a0a;
 }
 
 .review-status.approved {
-  background: rgba(35, 178, 109, 0.1);
-  border: 1px solid rgba(35, 178, 109, 0.25);
-  color: #208c5b;
+  background: rgba(35, 178, 109, 0.08);
+  border: 1px solid rgba(35, 178, 109, 0.22);
+  color: #1a5e3a;
 }
 
 .review-status.rejected {
-  background: rgba(234, 84, 85, 0.1);
-  border: 1px solid rgba(234, 84, 85, 0.26);
-  color: #ba3f40;
+  background: rgba(200, 50, 50, 0.07);
+  border: 1px solid rgba(200, 50, 50, 0.20);
+  color: #8b3232;
 }
 
 .review-assessment-grid {
@@ -594,9 +595,9 @@
 }
 
 .human-review-progress {
-  border: 1px solid rgba(88, 126, 231, 0.26);
+  border: 1px solid rgba(31, 42, 68, 0.16);
   border-radius: 12px;
-  background: rgba(88, 126, 231, 0.08);
+  background: rgba(31, 42, 68, 0.04);
   padding: 10px;
   display: grid;
   gap: 8px;
@@ -605,7 +606,7 @@
 
 .human-review-progress-current {
   font-size: 0.9rem;
-  color: #2f57b8;
+  color: #1f2a44;
   font-weight: 700;
 }
 
@@ -654,6 +655,10 @@
   place-items: center;
   font-weight: 900;
   color: #fff;
+  background: linear-gradient(135deg, #1f2a44, #2d3a52);
+}
+
+[data-theme="dark"] .upload-compact-fallback {
   background: linear-gradient(135deg, #3f7ce6, #4f5fdc);
 }
 
@@ -819,7 +824,7 @@
   outline: none;
   border-color: var(--accent-primary);
   background: rgba(255, 255, 255, 0.08);
-  box-shadow: 0 0 0 4px rgba(63, 124, 230, 0.15);
+  box-shadow: 0 0 0 4px var(--accent-glow);
 }
 
 .modern-dropzone {
@@ -840,7 +845,7 @@
 
 .modern-dropzone:hover {
   border-color: var(--accent-primary);
-  background: rgba(63, 124, 230, 0.05);
+  background: rgba(243, 198, 20, 0.05);
   color: var(--text-primary);
 }
 
@@ -981,6 +986,15 @@
   background: rgba(249, 112, 115, 0.14);
   border-color: rgba(249, 126, 129, 0.38);
   color: #f4a9ab;
+}
+
+[data-theme="dark"] .human-review-progress {
+  border-color: rgba(88, 126, 231, 0.26);
+  background: rgba(88, 126, 231, 0.08);
+}
+
+[data-theme="dark"] .human-review-progress-current {
+  color: #b8cbff;
 }
 
 [data-theme="dark"] .review-assessment-item,
