@@ -48,8 +48,8 @@ jobs:
       - name: Run backend tests
         run: cd backend && go test ./...
 
-  frontend-build:
-    name: Frontend Build
+  frontend-verify:
+    name: Frontend Verify
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -65,5 +65,49 @@ jobs:
       - name: Install dependencies
         run: cd frontend && npm ci
 
+      - name: Run frontend node tests
+        run: |
+          node --test \
+            frontend/src/services/api/request.test.ts \
+            frontend/src/features/skill-detail/readmeCache.test.ts \
+            frontend/src/contexts/dialogKeydown.test.ts \
+            frontend/src/components/aiMouseTracking.test.ts \
+            frontend/src/features/profile/profileActivity.test.ts \
+            frontend/src/features/upload/shared/tagInput.test.ts \
+            frontend/docker-runtime.test.mjs
+
       - name: Build frontend
         run: cd frontend && npm run build
+
+  docker-compose-smoke:
+    name: Docker Compose Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Render compose config
+        run: docker compose config
+
+      - name: Start local stack
+        run: docker compose up -d --build
+
+      - name: Wait for backend health
+        run: |
+          timeout 180 bash -c 'until curl -sf http://127.0.0.1:8080/health >/dev/null; do sleep 2; done'
+
+      - name: Wait for frontend home
+        run: |
+          timeout 180 bash -c 'until curl -fsS http://127.0.0.1:5173 >/dev/null; do sleep 2; done'
+          curl -I http://127.0.0.1:5173 >/dev/null
+
+      - name: Show compose status
+        run: docker compose ps
+
+      - name: Show compose logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Tear down compose stack
+        if: always()
+        run: docker compose down -v

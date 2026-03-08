@@ -5,4 +5,6 @@ uploads/
 avatars/
 thumbnails/
 .env
+.env.local
+.env.local.*
 .agent

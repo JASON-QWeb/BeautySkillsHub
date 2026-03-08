@@ -1,303 +1,227 @@
 # Skill Hub Architecture
 
-本文档解释这套仓库当前的技术边界、目录职责、数据流和运行方式。目标是让新的维护者可以快速判断：
-
-- 哪个目录负责什么
-- 本地怎么启动
-- 共享环境/生产环境怎么部署
-- 数据存在哪里
-- 测试依赖什么
+本文档描述当前仓库的技术边界、资源生命周期、数据流和运维约束。
 
 ## 1. 系统概览
 
-Skill Hub 采用前后端分离架构：
+Skill Hub 是一个前后端分离的内容平台：
 
-- `frontend/`
+- [frontend/](./frontend/)
   - React + Vite
-  - 负责页面渲染、路由、前端状态和 API 调用
-  - 只消费后端 API
-  - 只使用公开环境变量
-- `backend/`
+  - 页面、路由、上传表单、详情页、资料页、审核页
+  - 通过统一请求层访问 backend API
+- [backend/](./backend/)
   - Go + Gin + GORM
-  - 负责认证、资源管理、AI 审核、GitHub 同步、收藏点赞下载统计
-  - 通过 `DATABASE_URL` 连接 PostgreSQL
-- `db/`
-  - `init/`：本地 PostgreSQL 初始化脚本
-  - `migrations/`：正式业务 schema 来源
-  - `seed/`：本地演示数据
-- `infra/`
-  - 本地基础设施
-  - 当前主要提供 PostgreSQL 和 Redis
+  - 认证、资源管理、AI 审核、人工复核、GitHub 同步、统计
+- [db/](./db/)
+  - PostgreSQL schema、migration、seed
+- [infra/](./infra/)
+  - 本地 PostgreSQL / Redis 编排
 
-## 2. 仓库结构
+## 2. 资源模型
 
-```text
-Skill_Hub/
-├── backend/
-│   ├── cmd/
-│   │   ├── server/          后端 API 入口
-│   │   ├── migrate/         migration 执行入口
-│   │   └── clear-db/        本地清库入口
-│   └── internal/
-│       ├── config/          配置加载
-│       ├── database/        migration 封装
-│       ├── handler/         HTTP handler
-│       ├── model/           GORM model
-│       ├── service/         业务逻辑
-│       └── testutil/        PostgreSQL 测试 helper
-├── frontend/
-│   ├── src/                 React 业务代码
-│   ├── public/              静态资源
-│   ├── Dockerfile           前端镜像构建
-│   └── nginx.conf           容器内 Nginx 反代配置
-├── db/
-│   ├── init/
-│   ├── migrations/
-│   └── seed/
-├── infra/docker/
-│   └── compose.local.yml    本地 PostgreSQL / Redis
-├── scripts/
-│   ├── db-local.sh
-│   ├── run-all-migrations.sh
-│   ├── seed-local.sh
-│   └── clear-db-data.sh
-└── .github/workflows/
-    └── verify.yml           GitHub Actions 校验流水线
-```
+当前有两类资源生命周期：
+
+### 2.1 Reviewed Resources
+
+- `skill`
+- `rules`
+
+特点：
+
+- 上传后进入 AI 审核
+- AI 通过后进入人工复核
+- 人工通过后才视为正式发布
+- 后续更新走 revision 流，而不是直接覆盖线上可见版本
+- `skill` 可选 GitHub 同步；`rules` 不依赖 GitHub 同步
+
+### 2.2 Auto-Published Resources
+
+- `mcp`
+- `tools`
+
+特点：
+
+- 上传后直接标记为已通过、已发布
+- 不进入 AI 审核和人工复核
+- 更新时直接更新当前资源，不创建待审核 revision
 
 ## 3. 运行拓扑
 
-### 本地开发
+### 本地宿主机开发
 
 ```mermaid
 flowchart LR
-    Browser["Browser"] --> Frontend["Frontend (Vite :5173)"]
-    Frontend --> Backend["Backend (Go :8080)"]
+    Browser["Browser"] --> Frontend["Vite dev server :5173"]
+    Frontend --> Backend["Go API :8080"]
     Backend --> Postgres["PostgreSQL :5432"]
     Backend --> Redis["Redis :6379 (optional)"]
     Backend --> OpenAI["OpenAI API (optional)"]
     Backend --> GitHub["GitHub API (optional)"]
 ```
 
-特点：
+### Docker Compose 本地栈
 
-- PostgreSQL 和 Redis 通常由 `./scripts/db-local.sh` 启动
-- backend 和 frontend 通常单独运行，便于本地调试
-- backend 测试依赖 PostgreSQL，但不依赖 frontend/backend dev server 已启动
+```mermaid
+flowchart LR
+    Browser["Browser"] --> Frontend["Frontend container :8080 in container"]
+    Frontend --> Backend["Backend container :8080"]
+    Backend --> Postgres["postgres service"]
+    Backend --> Redis["redis service"]
+    Migrate["migrate job"] --> Postgres
+```
 
 ### 共享环境 / 生产环境
 
 ```mermaid
 flowchart LR
-    User["User / Browser"] --> Frontend["Frontend (static assets or container)"]
+    User["User / Browser"] --> Frontend["Static frontend or container"]
     Frontend --> Backend["Backend API"]
     Backend --> Postgres["External PostgreSQL"]
     Backend --> Redis["Optional Redis"]
-    Backend --> OpenAI["OpenAI API (optional)"]
-    Backend --> GitHub["GitHub API (optional)"]
+    Backend --> OpenAI["Optional OpenAI"]
+    Backend --> GitHub["Optional GitHub Sync"]
 ```
 
-特点：
+## 4. 前端架构
 
-- PostgreSQL 应独立部署，不跟应用容器耦合在一起
-- backend 与 frontend 可分别部署和回滚
-- 发布顺序固定为：`migrate -> backend -> frontend`
+核心特点：
 
-## 4. 请求与数据流
+- 根应用由 [frontend/src/App.tsx](./frontend/src/App.tsx) 组织
+- 顶层有全局 [AppErrorBoundary.tsx](./frontend/src/components/AppErrorBoundary.tsx)
+- 鉴权由 [AuthContext.tsx](./frontend/src/contexts/AuthContext.tsx) 维护
+- API 请求经由共享层 [request.ts](./frontend/src/services/api/request.ts)
+- token 存在 `localStorage`
+- 鉴权请求收到 `401` 会自动 logout
 
-### 资源读取流
+页面层面：
 
-1. 浏览器访问 frontend
-2. frontend 调用 `/api/...`
-3. backend 查询 PostgreSQL
-4. backend 按需访问 Redis / OpenAI / GitHub
-5. backend 返回 JSON 给 frontend
+- 首页与资源列表：[frontend/src/features/home/HomePage.tsx](./frontend/src/features/home/HomePage.tsx)
+- 详情页：[frontend/src/features/skill-detail/SkillDetailPage.tsx](./frontend/src/features/skill-detail/SkillDetailPage.tsx)
+- 上传页：[frontend/src/features/upload/](./frontend/src/features/upload/)
+- 审核页：[frontend/src/features/review/ReviewPage.tsx](./frontend/src/features/review/ReviewPage.tsx)
+- 资料页：[frontend/src/features/profile/ProfilePage.tsx](./frontend/src/features/profile/ProfilePage.tsx)
 
-### 资源上传流
+## 5. 后端架构
 
-1. 用户从 frontend 提交表单或文件
-2. backend 处理上传、入库、生成资源记录
-3. backend 根据资源类型触发 AI 审核或人工复核逻辑
-4. 如果开启 GitHub 同步，`skill` 资源可同步到 GitHub
+### 5.1 入口层
 
-### 数据变更流
+- 服务入口：[backend/cmd/server/main.go](./backend/cmd/server/main.go)
+- migration 入口：[backend/cmd/migrate/main.go](./backend/cmd/migrate/main.go)
+- 本地清库入口：[backend/cmd/clear-db/main.go](./backend/cmd/clear-db/main.go)
 
-1. 开发者新增 migration 文件
-2. 本地或测试环境先执行 migration
-3. 共享环境 / 生产环境发布前先执行 migration
-4. migration 成功后再发布 backend 和 frontend
+### 5.2 关键模块
 
-## 5. 数据边界
+- 配置：[backend/internal/config/](./backend/internal/config/)
+- 中间件：[backend/internal/middleware/](./backend/internal/middleware/)
+- HTTP handler：[backend/internal/handler/](./backend/internal/handler/)
+- 业务服务：[backend/internal/service/](./backend/internal/service/)
+- 结构化日志：[backend/internal/logging/](./backend/internal/logging/)
+
+### 5.3 中间件与运行时安全
+
+当前服务启动链路已经挂载：
+
+- CORS allowlist
+- 安全响应头
+- 上传请求体限制
+- 登录 / 注册 / review retry / AI chat 速率限制
+- `/health` 健康检查
+
+关键实现：
+
+- [backend/internal/middleware/cors.go](./backend/internal/middleware/cors.go)
+- [backend/internal/middleware/security_headers.go](./backend/internal/middleware/security_headers.go)
+- [backend/internal/middleware/rate_limit.go](./backend/internal/middleware/rate_limit.go)
+
+## 6. 数据边界
 
 ### PostgreSQL
 
-PostgreSQL 是主业务数据库。当前核心表：
+PostgreSQL 是唯一主业务数据库。
 
-- `users`
-- `skills`
-- `skill_likes`
-- `skill_favorites`
+业务 schema 只来自：
 
-约束：
+- [db/migrations/](./db/migrations/)
 
-- 业务 schema 只来自 `db/migrations/`
-- backend 启动时不负责建表
-- 不允许依赖 `AutoMigrate`
+backend 启动时不会自动建表。
 
 ### 文件系统
 
-后端本地文件目录仍用于存储资源文件：
+backend 仍使用本地文件目录保存二进制/派生资源：
 
-- `uploads/`
-- `thumbnails/`
-- `avatars/`
-
-这些目录属于应用资源目录，不是主数据库。
+- `backend/uploads`
+- `backend/thumbnails`
+- `backend/avatars`
 
 ### Redis
 
-Redis 只做可选缓存：
+Redis 是可选缓存层，不是主数据源。
 
-- AI 上下文缓存
-- 失效广播
+当前主要用于：
 
-Redis 不是主数据源。
+- AI skills 上下文缓存
+- 速率限制存储优先层
 
-## 6. 配置模型
+## 7. 认证与会话
 
-### Backend
+- 当前鉴权是 Bearer token，不是 Cookie session
+- frontend 使用 JWT + `localStorage`
+- backend 用 `Authorization: Bearer ...`
+- token 解析失败或过期时，鉴权 API 返回 `401`
+- frontend 统一把带鉴权 `401` 视为会话失效
 
-backend 主要使用运行时环境变量：
+## 8. 用户资料页数据流
 
-- `APP_ENV`
-- `PORT`
-- `DATABASE_URL`
-- `JWT_SECRET`
-- `REDIS_*`
-- `OPENAI_*`
-- `GITHUB_*`
+早期资料页通过“抓全站前 500 条再前端过滤”的方式工作。当前已经改成服务端专用接口：
 
-本地开发可使用：
+- `GET /api/me/uploads`
 
-- `backend/.env.local`
+该接口返回：
 
-共享环境与生产环境建议由部署系统或 secret 管理工具注入环境变量，不依赖仓库内真实 `.env` 文件。
+- 分页后的当前用户上传资源
+- 上传统计
+- top tags
+- recent activities
 
-### Frontend
+对应实现：
 
-frontend 只允许公开配置：
+- [backend/internal/handler/profile_handlers.go](./backend/internal/handler/profile_handlers.go)
+- [backend/internal/service/profile.go](./backend/internal/service/profile.go)
 
-- `VITE_APP_ENV`
-- `VITE_API_BASE_URL`
+## 9. 日志与可观测性
 
-前端不会持有：
+当前日志策略：
 
-- 数据库连接串
-- JWT secret
-- OpenAI key
-- GitHub token
+- `local` / `test`：文本 `slog`
+- 非本地环境：JSON `slog`
 
-## 7. 启动模型
+健康检查：
 
-### 本地启动
+- backend：`/health`
+- compose healthcheck 会主动探测 `backend /health`
 
-推荐顺序：
+## 10. 容器与部署约束
 
-1. `./scripts/db-local.sh`
-2. `./scripts/run-all-migrations.sh`
-3. `./scripts/seed-local.sh`（可选）
-4. `cd backend && go run cmd/server/main.go`
-5. `cd frontend && npm run dev`
-
-### 部署启动
-
-固定顺序：
-
-1. 执行 migration
-2. 发布 backend
-3. 发布 frontend
-
-即：
+- backend 容器以普通用户 `skillhub` 运行
+- frontend 容器以普通用户 `nginx` 运行
+- frontend 容器内部监听 `8080`
+- 生产发布顺序固定：
 
 ```text
 migrate -> backend -> frontend
 ```
 
-## 8. 测试与 CI
+## 11. 测试模型
 
-### 本地验证
+### backend
 
-当前最重要的本地校验命令：
+- 使用 PostgreSQL 测试环境
+- 按 migration 建 schema
+- 每个测试隔离 schema
 
-- `./scripts/run-all-migrations.sh`
-- `cd backend && go test ./...`
-- `cd frontend && npm run build`
+### frontend
 
-### backend 测试模型
-
-backend 测试已经统一切到 PostgreSQL：
-
-- 使用 `backend/internal/testutil/postgres.go`
-- 每个测试创建独立 schema
-- 执行正式 migration
-- 测试结束后自动清理 schema
-
-这保证测试语义更接近真实生产数据库，而不是 SQLite 特化行为。
-
-### GitHub Actions
-
-仓库内 GitHub Actions workflow：
-
-- `.github/workflows/verify.yml`
-
-负责：
-
-- backend test
-- frontend build
-
-不负责：
-
-- 生产部署
-- 数据库上线变更执行
-- 环境发布编排
-
-## 9. 迁移策略
-
-迁移采用 migration-first：
-
-- 不允许应用启动自动改表
-- 新增 schema 变化必须是显式 migration
-- 默认优先非破坏性变更
-- 破坏性变更使用 expand-and-contract
-
-例如重命名或替换字段时：
-
-1. 新增新列
-2. 回填旧数据
-3. backend 切到新列
-4. frontend 如有需要再跟进
-5. 稳定后再删旧列
-
-## 10. 运维边界
-
-这套仓库目前已经具备：
-
-- PostgreSQL 明确 migration 管理
-- 本地基础设施脚本
-- backend/frontend 分离发布
-- GitHub Actions 基础校验
-
-但企业环境通常还会额外补：
-
-- TLS / 统一网关
-- 监控 / 告警 / 日志采集
-- 备份 / 快照 / 恢复演练
-- Secret 管理
-- 权限与审计体系
-
-## 11. 相关文档
-
-- [README.md](./README.md)
-- [DEPLOYMENT.md](./DEPLOYMENT.md)
-- [GITHUB_ACTIONS.md](./GITHUB_ACTIONS.md)
-- [CI_CD_TEMPLATE.md](./CI_CD_TEMPLATE.md)
+- 当前以 `npm run build` 为主校验
+- 关键轻量逻辑使用 Node test
+- 包括请求层、README 缓存、Dialog Escape、AI 鼠标调度、Docker 运行时约束

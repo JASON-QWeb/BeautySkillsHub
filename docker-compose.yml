@@ -36,7 +36,7 @@ services:
       - -path
       - /migrations
       - -database
-      - postgres://skillhub:skillhub@postgres:5432/skillhub_local?sslmode=disable
+      - postgres://${POSTGRES_USER:-skillhub}:${POSTGRES_PASSWORD:-skillhub}@postgres:5432/${POSTGRES_DB:-skillhub_local}?sslmode=disable
       - up
 
   backend:
@@ -50,12 +50,27 @@ services:
         condition: service_started
       migrate:
         condition: service_completed_successfully
-    env_file:
-      - ./backend/.env.local
     environment:
+      APP_ENV: "${APP_ENV:-local}"
       PORT: "8080"
-      DATABASE_URL: postgres://skillhub:skillhub@postgres:5432/skillhub_local?sslmode=disable
-      REDIS_ADDR: redis:6379
+      DATABASE_URL: "postgres://${POSTGRES_USER:-skillhub}:${POSTGRES_PASSWORD:-skillhub}@postgres:5432/${POSTGRES_DB:-skillhub_local}?sslmode=disable"
+      JWT_SECRET: "${JWT_SECRET:-local-dev-secret}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENAI_BASE_URL: "${OPENAI_BASE_URL:-https://api.openai.com/v1}"
+      OPENAI_MODEL: "${OPENAI_MODEL:-gpt-4o-mini}"
+      UPLOAD_DIR: "${UPLOAD_DIR:-./uploads}"
+      THUMBNAIL_DIR: "${THUMBNAIL_DIR:-./thumbnails}"
+      REDIS_ADDR: "${REDIS_ADDR:-redis:6379}"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:-}"
+      REDIS_DB: "${REDIS_DB:-0}"
+      AI_SKILLS_CACHE_KEY: "${AI_SKILLS_CACHE_KEY:-ai:skills_context:v1}"
+      AI_SKILLS_INVALIDATE_CHANNEL: "${AI_SKILLS_INVALIDATE_CHANNEL:-ai:skills_context:invalidate}"
+      GITHUB_SYNC_ENABLED: "${GITHUB_SYNC_ENABLED:-false}"
+      GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
+      GITHUB_OWNER: "${GITHUB_OWNER:-}"
+      GITHUB_REPO: "${GITHUB_REPO:-}"
+      GITHUB_BRANCH: "${GITHUB_BRANCH:-main}"
+      GITHUB_BASE_DIR: "${GITHUB_BASE_DIR:-skills}"
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     volumes:
@@ -72,8 +87,8 @@ services:
     build:
       context: ./frontend
       args:
-        VITE_APP_ENV: local
-        VITE_API_BASE_URL: /api
+        VITE_APP_ENV: "${VITE_APP_ENV:-local}"
+        VITE_API_BASE_URL: "${VITE_API_BASE_URL:-/api}"
     restart: unless-stopped
     depends_on:
       backend:

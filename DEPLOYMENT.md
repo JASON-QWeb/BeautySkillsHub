@@ -1,18 +1,18 @@
 # Skill Hub Deployment
 
-本文档是一份可直接照着操作的部署手册，目标是把当前仓库部署到共享环境或生产环境。
+本文档描述当前仓库部署到共享环境或生产环境时的推荐做法。
 
-核心原则只有一条：
+核心原则：
 
 ```text
 migrate -> backend -> frontend
 ```
 
-不要让 backend 在启动时自动改表。
+不要让 backend 在启动时替代 migration 做 schema 变更。
 
 ## 1. 推荐部署形态
 
-推荐形态：
+推荐使用：
 
 - 外部 PostgreSQL
 - 可选外部 Redis
@@ -20,41 +20,78 @@ migrate -> backend -> frontend
 - frontend 单独部署
 - 发布前先执行 migration
 
-如果你当前代码托管在 GitHub，可以先依赖：
+如果你使用容器化部署，仓库已经提供：
 
-- [`.github/workflows/verify.yml`](./.github/workflows/verify.yml)
-
-完成基础校验，再进入正式发布。
+- [backend/Dockerfile](./backend/Dockerfile)
+- [frontend/Dockerfile](./frontend/Dockerfile)
+- [frontend/nginx.conf](./frontend/nginx.conf)
 
 ## 2. 部署前准备
 
-### 系统要求
-
-建议环境：
-
-- Linux x86_64
-- Docker Engine（如果采用容器化部署）
-- Go `1.25+`（如果在服务器上直接跑 migration 或 backend）
-- Node.js `20+`（如果在服务器上直接构建 frontend）
-- 可访问 PostgreSQL
-- 若启用 OpenAI / GitHub 集成，需要能访问对应外部 API
-
-### 基础资源
-
-部署前至少准备：
+### 必备资源
 
 - PostgreSQL 数据库实例
-- 一个可连接 PostgreSQL 的 `DATABASE_URL`
+- 安全的 `DATABASE_URL`
 - backend 运行时环境变量
-- frontend 的公开配置
+- frontend 构建配置
 
-可选：
+### 可选资源
 
 - Redis
-- 外层网关 / Nginx / TLS
-- 监控与日志采集
+- 反向代理 / TLS 终止层
+- 日志平台 / 监控平台
 
-## 3. backend 环境变量
+## 3. 生产安全约束
+
+### 3.1 DATABASE_URL
+
+非本地环境当前会强制要求：
+
+- `DATABASE_URL` 不能为空
+- `DATABASE_URL` 不能使用 `sslmode=disable`
+
+所以生产示例应使用：
+
+- `sslmode=require`
+- 或更严格的 `sslmode=verify-full`
+
+示例：
+
+```env
+DATABASE_URL=postgres://skillhub:strong-password@postgres-host:5432/skillhub_prod?sslmode=require
+```
+
+### 3.2 JWT_SECRET
+
+非本地环境必须显式设置：
+
+```env
+JWT_SECRET=replace-with-a-long-random-secret
+```
+
+未设置时服务会直接启动失败，而不是生成临时密钥。
+
+### 3.3 CORS / 安全头
+
+生产至少应配置：
+
+- `CORS_ALLOWED_ORIGINS`
+- `SECURITY_CSP`
+- `SECURITY_CSP_REPORT_ONLY`（灰度期间可先开）
+- `HSTS_ENABLED=true`
+
+### 3.4 限流
+
+当前后端已经内建以下速率限制：
+
+- 登录
+- 注册
+- 审核重试
+- AI chat
+
+生产建议同时配置 Redis，让限流在多实例下可共享状态。
+
+## 4. backend 环境变量
 
 ### 必需
 
@@ -63,7 +100,7 @@ migrate -> backend -> frontend
 - `DATABASE_URL`
 - `JWT_SECRET`
 
-### 按需
+### 常用可选
 
 - `REDIS_ADDR`
 - `REDIS_PASSWORD`
@@ -77,22 +114,18 @@ migrate -> backend -> frontend
 - `GITHUB_REPO`
 - `GITHUB_BRANCH`
 - `GITHUB_BASE_DIR`
+- `CORS_ALLOWED_ORIGINS`
+- `SECURITY_CSP`
+- `SECURITY_CSP_REPORT_ONLY`
+- `HSTS_ENABLED`
 
-### 推荐做法
-
-生产不要依赖仓库里的 `.env.local`。建议把 backend 环境变量放在：
-
-- 部署系统注入
-- Secret 管理平台
-- 或服务器上的独立 env 文件，例如 `/etc/skill-hub/backend.env`
-
-示例：
+推荐示例：
 
 ```env
-APP_ENV=prod
+APP_ENV=production
 PORT=8080
-DATABASE_URL=postgres://skillhub:strong-password@postgres-host:5432/skillhub_prod?sslmode=disable
-JWT_SECRET=replace-with-a-strong-secret
+DATABASE_URL=postgres://skillhub:strong-password@postgres-host:5432/skillhub_prod?sslmode=require
+JWT_SECRET=replace-with-a-long-random-secret
 REDIS_ADDR=redis-host:6379
 REDIS_PASSWORD=
 REDIS_DB=0
@@ -100,46 +133,44 @@ OPENAI_API_KEY=
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4o-mini
 GITHUB_SYNC_ENABLED=false
+CORS_ALLOWED_ORIGINS=https://app.example.com,https://admin.example.com
+SECURITY_CSP=default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'
+SECURITY_CSP_REPORT_ONLY=false
+HSTS_ENABLED=true
 ```
 
-## 4. frontend 配置
+## 5. frontend 配置
 
-frontend 只需要公开配置：
+frontend 只接受公开配置：
 
 - `VITE_APP_ENV`
 - `VITE_API_BASE_URL`
 
-当前仓库有两种典型部署方式：
+两种典型部署方式：
 
-### 方式 A：容器内 Nginx 反代 backend
+### 5.1 前端容器内 Nginx 反代 backend
 
-如果直接使用 [frontend/Dockerfile](/Users/qianjianghao/Desktop/Skill_Hub/frontend/Dockerfile) 和 [frontend/nginx.conf](/Users/qianjianghao/Desktop/Skill_Hub/frontend/nginx.conf)，那么前端容器会把 `/api/` 代理到容器网络里的 `backend:8080`。
+如果直接使用仓库里的前端容器：
 
-这时前端不一定需要显式设置 `VITE_API_BASE_URL`。
+- 容器内部 Nginx 监听 `8080`
+- `/api/` 会转发给同一 Docker 网络内的 `backend:8080`
 
-### 方式 B：静态资源交给外部 Nginx / CDN
+### 5.2 纯静态部署
 
-如果你把 `frontend/dist` 部署到独立静态服务器，而不是使用仓库内的前端容器，那么建议在构建前设置：
+如果把 `frontend/dist` 交给外部 Nginx / CDN：
 
 ```bash
-export VITE_APP_ENV=prod
+export VITE_APP_ENV=production
 export VITE_API_BASE_URL=https://your-backend.example.com
-```
-
-然后再执行：
-
-```bash
 cd frontend && npm ci && npm run build
 ```
 
-## 5. 执行 migration
+## 6. 执行 migration
 
-这是部署里最关键的一步。
-
-在目标环境准备好 `DATABASE_URL` 后，先执行：
+部署前先执行：
 
 ```bash
-export DATABASE_URL='postgres://skillhub:strong-password@postgres-host:5432/skillhub_prod?sslmode=disable'
+export DATABASE_URL='postgres://skillhub:strong-password@postgres-host:5432/skillhub_prod?sslmode=require'
 ./scripts/run-all-migrations.sh
 ```
 
@@ -147,17 +178,18 @@ export DATABASE_URL='postgres://skillhub:strong-password@postgres-host:5432/skil
 
 - migration 失败，后续发布立即停止
 - migration 成功后，才允许发布 backend
-- backend 不允许代替 migration 做 schema 变更
 
-## 6. 部署 backend
+## 7. 部署 backend
 
-## 6.1 方式 A：容器化部署 backend
+### 7.1 容器化部署
 
-仓库已经提供：
+当前 backend 镜像特性：
 
-- [backend/Dockerfile](/Users/qianjianghao/Desktop/Skill_Hub/backend/Dockerfile)
+- 进程以非 root 用户 `skillhub` 运行
+- 端口 `8080`
+- `/health` 可作为健康检查
 
-推荐命令：
+示例：
 
 ```bash
 docker network create skill-hub || true
@@ -181,33 +213,26 @@ docker run -d \
   skill-hub-backend:latest
 ```
 
-说明：
-
-- backend 容器名建议就叫 `backend`
-- 这样前端容器可以直接通过容器网络里的 `backend:8080` 反代 API
-- 上传目录、缩略图、头像目录要用 volume 持久化
-
-## 6.2 方式 B：直接部署 backend 二进制
-
-如果你不使用 Docker，也可以：
+### 7.2 非容器部署
 
 ```bash
 cd backend
 go build -o ../bin/skill-hub-backend ./cmd/server
 ```
 
-然后通过 systemd 或其他进程管理工具启动，并注入 backend 环境变量。
+然后通过 systemd 或平台进程管理工具启动，并注入运行时环境变量。
 
-## 7. 部署 frontend
+## 8. 部署 frontend
 
-## 7.1 方式 A：容器化部署 frontend
+### 8.1 容器化部署
 
-仓库已经提供：
+当前 frontend 镜像特性：
 
-- [frontend/Dockerfile](/Users/qianjianghao/Desktop/Skill_Hub/frontend/Dockerfile)
-- [frontend/nginx.conf](/Users/qianjianghao/Desktop/Skill_Hub/frontend/nginx.conf)
+- 容器以非 root 用户 `nginx` 运行
+- 容器内监听 `8080`
+- 外部通常映射到 `80`
 
-推荐命令：
+示例：
 
 ```bash
 docker build -t skill-hub-frontend:latest ./frontend
@@ -221,138 +246,103 @@ docker run -d \
   skill-hub-frontend:latest
 ```
 
-说明：
-
-- 这个前端容器默认会把 `/api/` 转发给同一 Docker 网络里的 `backend:8080`
-- 因此 backend 容器名和网络连通性很关键
-
-## 7.2 方式 B：部署静态产物
-
-如果你不用前端容器，则按下面方式：
+### 8.2 静态产物部署
 
 ```bash
-export VITE_APP_ENV=prod
+export VITE_APP_ENV=production
 export VITE_API_BASE_URL=https://your-backend.example.com
 cd frontend && npm ci && npm run build
 ```
 
-然后把 `frontend/dist` 交给你自己的 Nginx、对象存储或 CDN。
+然后把 `frontend/dist` 交给你自己的静态托管层。
 
-## 8. 完整部署顺序
-
-推荐顺序：
-
-1. 拉取或更新代码
-2. 准备 backend 环境变量
-3. 确认 PostgreSQL 可连接
-4. 执行 migration
-5. 发布 backend
-6. 验证 backend
-7. 发布 frontend
-8. 验证 frontend 与 API
-
-也就是：
-
-```text
-update code -> migrate -> backend -> frontend -> verify
-```
-
-## 9. 发布后验证
+## 9. 健康检查与发布后验证
 
 最低验证清单：
 
 ```bash
-curl -i http://127.0.0.1/api/skills
+curl -i http://127.0.0.1:8080/health
+curl -i http://127.0.0.1:8080/api/skills
 curl -I http://127.0.0.1/
 docker logs backend --tail 100
 ```
 
 期望：
 
-- frontend 首页可以访问
+- `/health` 返回 `200`
 - `/api/skills` 返回 `200`
-- backend 日志没有数据库连接或 migration 相关错误
+- frontend 首页可访问
+- backend 日志没有数据库连接、migration、JWT 或 CORS 配置错误
 
-## 10. 升级发布
+## 10. 推荐发布顺序
 
-以后每次升级建议按下面流程：
+```text
+update code -> migrate -> backend -> frontend -> verify
+```
+
+对应操作：
+
+1. 更新代码
+2. 准备 backend 环境变量
+3. 验证 PostgreSQL 可连接
+4. 执行 migration
+5. 发布 backend
+6. 验证 backend `/health`
+7. 发布 frontend
+8. 做端到端验证
+
+## 11. 升级发布
 
 ```bash
 git pull
-export DATABASE_URL='postgres://skillhub:strong-password@postgres-host:5432/skillhub_prod?sslmode=disable'
+export DATABASE_URL='postgres://skillhub:strong-password@postgres-host:5432/skillhub_prod?sslmode=require'
 ./scripts/run-all-migrations.sh
 
 docker build -t skill-hub-backend:latest ./backend
 docker build -t skill-hub-frontend:latest ./frontend
 
 docker rm -f backend frontend || true
-# 然后重新 run backend / frontend
+# 然后按你的运行方式重新启动
 ```
 
-如果你采用 systemd 或平台型部署，也同样遵守：
+## 12. 回滚原则
 
-```text
-migrate -> backend -> frontend
-```
+应用回滚和数据库回滚分开看。
 
-## 11. 回滚原则
+### 应用层
 
-推荐把回滚分成两层：
+- backend 可独立回滚
+- frontend 可独立回滚
 
-### 应用回滚
+### 数据库层
 
-- 回滚 backend 版本
-- 回滚 frontend 版本
-
-### 数据库回滚
-
-- 不建议把 `down` migration 当常规回滚按钮
-- 生产环境更推荐：
-  - 前向修复
+- 不建议把 `down` migration 当作生产常规回滚按钮
+- 更推荐：
   - 兼容性发布
+  - 前向修复
   - 稳定后再清理旧结构
 
-## 12. 常见问题
+## 13. 常见问题
 
-### 12.1 migration 失败
+### 13.1 服务启动即 panic
 
-处理顺序：
+优先检查：
 
-1. 停止后续发布
-2. 查看失败的 migration 文件
-3. 修复后重新执行 migration
-4. 确认 schema 状态正确后再继续发布
+- `APP_ENV` 是否已经切到非本地环境
+- `DATABASE_URL` 是否仍然使用 `sslmode=disable`
+- `JWT_SECRET` 是否遗漏
 
-### 12.2 backend 启动失败
+### 13.2 前端跨域失败
 
-检查：
+优先检查：
 
-1. `DATABASE_URL` 是否正确
-2. migration 是否已成功执行
-3. PostgreSQL 网络是否可达
-4. backend env 文件是否加载成功
+- `CORS_ALLOWED_ORIGINS` 是否包含真实前端域名
+- 反向代理是否改写了 `Origin`
 
-### 12.3 frontend 调不到接口
+### 13.3 审核/AI 能力不可用
 
-检查：
+优先检查：
 
-1. `VITE_API_BASE_URL` 是否正确
-2. 如果是前端容器，backend 是否在同一 Docker 网络里并且名字为 `backend`
-3. 反向代理、网关或安全组是否已放通
-
-### 12.4 GitHub Actions 和正式部署的关系
-
-仓库内的 GitHub Actions workflow 只负责：
-
-- backend test
-- frontend build
-- 基础 verify
-
-它不是完整部署流水线。正式部署仍然要遵守本文件里的发布顺序。
-
-## 13. 相关文档
-
-- [README.md](./README.md)
-- [ARCHITECTURE.md](./ARCHITECTURE.md)
-- [GITHUB_ACTIONS.md](./GITHUB_ACTIONS.md)
-- [CI_CD_TEMPLATE.md](./CI_CD_TEMPLATE.md)
+- `OPENAI_API_KEY`
+- `OPENAI_BASE_URL`
+- 外网访问策略
