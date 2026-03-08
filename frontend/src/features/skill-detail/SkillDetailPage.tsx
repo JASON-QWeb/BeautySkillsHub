@@ -420,7 +420,7 @@ function SkillDetailPage({ resourceTypeOverride }: SkillDetailPageProps) {
                         {requiresReview && canManage && hasPendingRevision && (
                             <button
                                 type="button"
-                                className="btn btn-secondary detail-title-action"
+                                className="detail-title-action action-pending"
                                 onClick={() => navigate(`/review/${skill.id}`, { state: { resourceType: skill.resource_type } })}
                             >
                                 有未Review的更新
@@ -429,7 +429,7 @@ function SkillDetailPage({ resourceTypeOverride }: SkillDetailPageProps) {
                         {requiresReview && canManage && !hasPendingRevision && (
                             <button
                                 type="button"
-                                className="btn btn-secondary detail-title-action"
+                                className="detail-title-action action-update"
                                 onClick={() => navigate(`/resource/${currentResourceType}/upload?edit=${skill.id}`)}
                             >
                                 {t('detail.update')}
@@ -438,7 +438,7 @@ function SkillDetailPage({ resourceTypeOverride }: SkillDetailPageProps) {
                         {requiresReview && !canManage && hasPendingRevision && user && (
                             <button
                                 type="button"
-                                className="btn btn-secondary detail-title-action"
+                                className="detail-title-action action-review"
                                 onClick={() => navigate(`/review/${skill.id}`, { state: { resourceType: skill.resource_type } })}
                             >
                                 新版本，待Review
