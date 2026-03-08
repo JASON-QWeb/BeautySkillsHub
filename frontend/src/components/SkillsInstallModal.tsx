@@ -14,7 +14,7 @@ interface InstallConfig {
 }
 
 const FALLBACK_CONFIG: InstallConfig = {
-    github_repo: 'https://github.com/JASON-QWeb/agent-skills',
+    github_repo: 'https://github.com/example/agent-skills',
     github_base_dir: 'skills',
 }
 

@@ -11,21 +11,21 @@ func TestResolveInstallRepoURL(t *testing.T) {
 	}{
 		{
 			name:     "owner and repo name",
-			owner:    "JASON-QWeb",
+			owner:    "example",
 			repo:     "agent-skills",
-			expected: "https://github.com/JASON-QWeb/agent-skills",
+			expected: "https://github.com/example/agent-skills",
 		},
 		{
 			name:     "repo includes owner slash repo",
 			owner:    "",
-			repo:     "JASON-QWeb/agent-skills",
-			expected: "https://github.com/JASON-QWeb/agent-skills",
+			repo:     "example/agent-skills",
+			expected: "https://github.com/example/agent-skills",
 		},
 		{
 			name:     "repo is full github url",
 			owner:    "",
-			repo:     "https://github.com/JASON-QWeb/agent-skills.git",
-			expected: "https://github.com/JASON-QWeb/agent-skills",
+			repo:     "https://github.com/example/agent-skills.git",
+			expected: "https://github.com/example/agent-skills",
 		},
 		{
 			name:     "fallback when missing",

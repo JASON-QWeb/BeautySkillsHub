@@ -22,12 +22,13 @@
 - `db/init/` 只负责本地数据库初始化，不承担业务建表
 - `db/seed/` 只负责可选的本地演示数据，不属于正式 schema
 
-当前正式业务 schema 由下面两组 migration 共同定义：
+当前正式业务 schema 由下面三组 migration 共同定义：
 
 - `db/migrations/0001_init_schema.up.sql`
 - `db/migrations/0002_add_skill_revisions.up.sql`
+- `db/migrations/0003_add_engagement_foreign_keys.up.sql`
 
-如果你将来再新增 `0003_xxx.up.sql`，这份文档也必须同步更新。
+如果你将来再新增 `0004_xxx.up.sql`，这份文档也必须同步更新。
 
 ## 2. `db/` 目录结构说明
 
@@ -42,7 +43,9 @@ db/
 │   ├── 0001_init_schema.up.sql
 │   ├── 0001_init_schema.down.sql
 │   ├── 0002_add_skill_revisions.up.sql
-│   └── 0002_add_skill_revisions.down.sql
+│   ├── 0002_add_skill_revisions.down.sql
+│   ├── 0003_add_engagement_foreign_keys.up.sql
+│   └── 0003_add_engagement_foreign_keys.down.sql
 └── seed/
     └── local_seed.sql
 ```
@@ -68,7 +71,7 @@ db/
 
 特点：
 
-- 由 `scripts/db-local.sh` 执行
+- 由 `./scripts/local.sh db up` 间接执行
 - 目标是把本地 PostgreSQL 环境准备好
 - 不承担业务建表，不应该把业务 schema 写在这里
 
@@ -91,7 +94,7 @@ db/
 
 特点：
 
-- 由 `./scripts/run-all-migrations.sh` 调用 `backend/cmd/migrate` 执行
+- 由 `./scripts/local.sh migrate` 或 `docker compose` 中的 `migrate` 服务执行
 - 使用 `golang-migrate` 按版本顺序执行
 - `.up.sql` 表示正向升级
 - `.down.sql` 表示回滚脚本
@@ -143,13 +146,27 @@ db/
 - 它只属于回滚路径
 - 正常上线执行 migration 时不会自动跑到这里
 
+#### `db/migrations/0003_add_engagement_foreign_keys.up.sql`
+
+作用：
+
+- 为 `skill_likes` 和 `skill_favorites` 补齐外键约束
+- 让点赞、收藏数据和 `users`、`skills` 之间的引用关系更可靠
+- 用 `ON DELETE CASCADE` 保证主记录删除后关联记录同步清理
+
+#### `db/migrations/0003_add_engagement_foreign_keys.down.sql`
+
+作用：
+
+- 回滚 `0003` 中新增的外键约束
+
 ### 3.4 `db/seed/`
 
 这个目录放“可选的本地种子数据”。
 
 特点：
 
-- 由 `./scripts/seed-local.sh` 执行
+- 由 `./scripts/local.sh seed` 执行
 - 主要用于本地开发、联调、演示
 - 不属于正式 schema 的一部分
 - 不应该被当成生产初始化脚本
@@ -173,17 +190,17 @@ db/
 最常见顺序是：
 
 ```text
-./scripts/db-local.sh
--> ./scripts/run-all-migrations.sh
--> ./scripts/seed-local.sh   (可选)
+./scripts/local.sh db up
+-> ./scripts/local.sh migrate
+-> ./scripts/local.sh seed   (可选)
 -> 启动 backend / frontend
 ```
 
 对应职责：
 
-- `db-local.sh`：启动本地 PostgreSQL / Redis，并执行 `db/init/*.sql`
-- `run-all-migrations.sh`：执行 `db/migrations/*.up.sql`
-- `seed-local.sh`：把 `db/seed/local_seed.sql` 灌进本地库
+- `./scripts/local.sh db up`：启动本地 PostgreSQL / Redis，并准备数据库运行环境
+- `./scripts/local.sh migrate`：执行 `db/migrations/*.up.sql`
+- `./scripts/local.sh seed`：把 `db/seed/local_seed.sql` 灌进本地库
 
 ### 4.2 容器完整栈开发流程
 
@@ -224,9 +241,9 @@ migrate -> backend -> frontend
 
 所以：
 
-- 正常执行 `./scripts/run-all-migrations.sh` 时，不会先执行 `.down.sql`
+- 正常执行 `./scripts/local.sh migrate` 时，不会先执行 `.down.sql`
 - 已经执行过的 migration 不会重复执行
-- 新部署只会继续向前执行新的版本，例如未来的 `0003_xxx.up.sql`
+- 新部署只会继续向前执行新的版本，例如未来的 `0004_xxx.up.sql`
 
 你看到的 `DROP TABLE` / `DROP INDEX`，是给“手动回滚”准备的，不是给“正常升级”准备的。
 

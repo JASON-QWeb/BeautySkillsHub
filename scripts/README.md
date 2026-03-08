@@ -101,4 +101,4 @@ SEED_LOCAL=0 ./scripts/local.sh dev
 - 本地开发尽量零配置可用
 - 优先复用 `backend/.env.local`
 - 没有 `backend/.env.local` 时自动回退到本地默认值
-- 脚本只解决“本地运行和维护”，生产部署步骤仍以 [DEPLOYMENT.md](../DEPLOYMENT.md) 为准
+- 脚本只解决“本地运行和维护”；公开仓库的启动入口以 [README.md](../README.md) 和 [AIREAD.md](../AIREAD.md) 为准

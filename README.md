@@ -1,160 +1,65 @@
-# Skill Hub
+# BeautySkillsHub
 
-Skill Hub 是一个前后端分离的资源平台，当前支持四类内容：
+<p align="center">
+  <img src="./demo1.png" alt="BeautySkillsHub demo screenshot 1" width="49%" />
+  <img src="./demo2.png" alt="BeautySkillsHub demo screenshot 2" width="49%" />
+</p>
 
-- `skill`：可复用技能/自动化能力
-- `rules`：规则、规范、策略类文本资源
-- `mcp`：MCP 服务或元数据资源
-- `tools`：工具包、CLI、插件等资源
+<p align="center">
+  开源的 AI 相关资源整合平台，聚合 <code>skill</code>、<code>rules</code>、<code>mcp</code>、<code>tools</code> 四类内容。
+</p>
 
-当前主线能力已经包括：
+## 推荐：AI 一键了解项目并启动
 
-- `skill / rules` 的 AI 审核、人工复核、重试与 revision 流程
-- `mcp / tools` 的自动通过、自动发布上传流
-- 点赞、收藏、下载统计
-- 用户资料页的上传分页、收藏列表、活动摘要
-- PostgreSQL + migration-first 数据库管理
-- `/health` 健康检查、CORS allowlist、安全响应头、速率限制
-- 非 root 容器运行与结构化日志
+阅读 [AIREAD.md](./AIREAD.md)。
 
-## 快速入口
+## 项目一键启动
 
-第一次接手项目，建议按这个顺序看：
-
-1. [README.md](./README.md)
-2. [DEVELOPMENT.md](./DEVELOPMENT.md)
-3. [ARCHITECTURE.md](./ARCHITECTURE.md)
-4. [DEPLOYMENT.md](./DEPLOYMENT.md)
-5. [db/SCHEMA.md](./db/SCHEMA.md)
-6. [ai-review流程.md](./ai-review流程.md)
-
-## 快速启动
-
-### 前置要求
-
-本地开发建议准备：
-
-- Docker Desktop / Docker Engine
-- Go `1.25+`
-- Node.js `20+`
-- npm `10+`
-
-### 1. 启动方式选择
-
-如果你走 `Docker Compose` 完整本地栈：
-
-- 不需要先创建 `backend/.env.local`
-- 默认值已经内置在 [docker-compose.yml](./docker-compose.yml)
-- 如果你要接入自己的 OpenAI / GitHub token，再通过 shell 环境变量覆盖即可
-
-如果你走“宿主机直接跑 backend/frontend”的开发流：
-
-- 可以先直接用 `./scripts/local.sh` 跑起来
-- 只有在你要覆盖默认本地配置时，才需要准备本地 env 文件
-
-### 2. 宿主机开发时准备环境文件
-
-```bash
-cp backend/.env.local.example backend/.env.local
-cp frontend/.env.local.example frontend/.env.local
-```
-
-本地最关键的变量：
-
-- [backend/.env.local.example](./backend/.env.local.example)
-  - `DATABASE_URL`
-  - `JWT_SECRET`
-- [frontend/.env.local.example](./frontend/.env.local.example)
-  - `VITE_API_BASE_URL`
-
-### 3. 一键启动完整本地栈
+推荐直接启动完整本地栈：
 
 ```bash
 docker compose up -d --build
-
-# 关闭
-docker compose down
-
-# 清空并关闭
-docker compose down -v
 ```
 
-这会启动：
-
-- PostgreSQL
-- Redis
-- migration 一次性任务
-- backend
-- frontend
-
-本地默认访问地址：
+启动后默认访问：
 
 - 前端：`http://localhost:5173`
+- 后端健康检查：`http://localhost:8080/health`
 - 后端 API：`http://localhost:8080/api/...`
-- 健康检查：`http://localhost:8080/health`
 
-### 4. 宿主机开发流
+停止服务：
 
-如果你想直接在本机跑 backend/frontend，推荐直接用：
+```bash
+docker compose down
+```
+
+如果你想在宿主机直接调试前后端：
 
 ```bash
 ./scripts/local.sh dev
 ```
 
-如果你想拆开执行数据库、迁移和 seed，也统一走：
+## 项目介绍
 
-```bash
-./scripts/local.sh db up
-./scripts/local.sh migrate
-./scripts/local.sh seed
-```
+BeautySkillsHub 当前是一套前后端分离的资源平台，围绕“上传、审核、发布、发现、复用”展开，已经具备这些核心能力：
 
-完整开发说明见 [DEVELOPMENT.md](./DEVELOPMENT.md) 和 [scripts/README.md](./scripts/README.md)。
+- `skill / rules` 走 AI 审核 + 人工复核 + revision 更新流
+- `mcp / tools` 走自动通过、自动发布流
+- 支持点赞、收藏、下载统计和个人上传分页
+- 使用 PostgreSQL migration-first 模式管理业务 schema
+- 内置 `/health`、安全响应头、CORS allowlist、限流和非 root 容器运行
 
-## 当前项目事实
+技术栈：
 
-- 业务 schema 只来自 [db/migrations](./db/migrations)
-- backend 启动时不会自动建表或改表
-- `skill / rules` 走 reviewed flow；`mcp / tools` 走 auto-published flow
-- profile 上传列表已经改成服务端分页接口 `/api/me/uploads`
-- 非本地环境必须显式提供安全 `DATABASE_URL` 和 `JWT_SECRET`
-- frontend 请求层已经统一处理 401 会话失效
+- 后端：Go + Gin + GORM
+- 前端：React + Vite + TypeScript
+- 数据层：PostgreSQL + Redis
+- 运行方式：Docker Compose / 宿主机双模式
 
-## 常用验证
+## 仓库导览
 
-```bash
-cd backend && go test ./...
-cd frontend && npm run build
-```
-
-前端轻量回归测试也可直接跑：
-
-```bash
-cd frontend && npm run test:node
-```
-
-更多脚本、测试和本地维护命令见 [DEVELOPMENT.md](./DEVELOPMENT.md)。
-
-## 文档地图
-
-- 开发指南：[DEVELOPMENT.md](./DEVELOPMENT.md)
-- 本地脚本说明：[scripts/README.md](./scripts/README.md)
-- Backend 说明：[backend/README.md](./backend/README.md)
-- Frontend 说明：[frontend/README.md](./frontend/README.md)
-- 架构总览：[ARCHITECTURE.md](./ARCHITECTURE.md)
-- 部署手册：[DEPLOYMENT.md](./DEPLOYMENT.md)
-- AI 审核流程：[ai-review流程.md](./ai-review流程.md)
-- 数据库说明：[db/SCHEMA.md](./db/SCHEMA.md)
-- GitHub Actions：[GITHUB_ACTIONS.md](./GITHUB_ACTIONS.md)
-- GitHub 同步配置：[GITHUB_SYNC_SETUP.md](./GITHUB_SYNC_SETUP.md)
-- CI/CD 模板：[CI_CD_TEMPLATE.md](./CI_CD_TEMPLATE.md)
-
-## 部署原则
-
-共享环境和生产环境统一遵循：
-
-```text
-migrate -> backend -> frontend
-```
-
-详细步骤和安全约束见 [DEPLOYMENT.md](./DEPLOYMENT.md)。
+- [AIREAD.md](./AIREAD.md)：给 AI 编码助手的最短上手路径
+- [backend/README.md](./backend/README.md)：后端结构、启动、测试
+- [frontend/README.md](./frontend/README.md)：前端结构、构建、测试
+- [scripts/README.md](./scripts/README.md)：本地脚本入口说明
+- [db/SCHEMA.md](./db/SCHEMA.md)：数据库结构与 migration 说明
