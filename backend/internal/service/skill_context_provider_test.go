@@ -3,13 +3,10 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 
 	"skill-hub/internal/model"
-
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
+	"skill-hub/internal/testutil"
 )
 
 type fakeSkillContextCache struct {
@@ -45,14 +42,7 @@ func (f *fakeSkillContextCache) PublishInvalidate(_ context.Context, channel str
 func newSkillServiceForContextTest(t *testing.T) *SkillService {
 	t.Helper()
 
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	if err := db.AutoMigrate(&model.Skill{}); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+	tdb := testutil.OpenPostgresTestDB(t)
 
 	seed := []model.Skill{
 		{Name: "approved-a", Description: "ok", Category: "cat", ResourceType: "skill", AIApproved: true},
@@ -60,12 +50,12 @@ func newSkillServiceForContextTest(t *testing.T) *SkillService {
 		{Name: "rejected-c", Description: "no", Category: "cat", ResourceType: "skill", AIApproved: false},
 	}
 	for _, sk := range seed {
-		if err := db.Create(&sk).Error; err != nil {
+		if err := tdb.DB.Create(&sk).Error; err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 	}
 
-	return NewSkillService(db)
+	return NewSkillService(tdb.DB)
 }
 
 func TestSkillContextProvider_GetSkillsContextJSON_CacheHit(t *testing.T) {

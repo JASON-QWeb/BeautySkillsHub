@@ -7,7 +7,7 @@ import (
 	"skill-hub/internal/config"
 	"skill-hub/internal/model"
 
-	"github.com/glebarez/sqlite"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -21,7 +21,7 @@ type purgeStats struct {
 func main() {
 	cfg := config.Load()
 
-	db, err := gorm.Open(sqlite.Open(cfg.DBPath), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("数据库连接失败: %v", err)
 	}
@@ -31,7 +31,7 @@ func main() {
 		log.Fatalf("清理失败: %v", err)
 	}
 
-	fmt.Printf("已清空数据库数据（DB: %s）\n", cfg.DBPath)
+	fmt.Printf("已清空数据库数据（DB: %s）\n", cfg.DatabaseURL)
 	fmt.Printf("- users: %d\n", stats.Users)
 	fmt.Printf("- skills: %d\n", stats.Skills)
 	fmt.Printf("- skill_likes: %d\n", stats.SkillLikes)
@@ -88,8 +88,7 @@ func purgeAllData(db *gorm.DB) (purgeStats, error) {
 	}
 
 	if err := tx.Exec(
-		"DELETE FROM sqlite_sequence WHERE name IN (?, ?, ?, ?)",
-		"skill_favorites", "skill_likes", "skills", "users",
+		"TRUNCATE TABLE skill_favorites, skill_likes, skills, users RESTART IDENTITY CASCADE",
 	).Error; err != nil {
 		tx.Rollback()
 		return stats, err

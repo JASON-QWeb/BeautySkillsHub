@@ -1,62 +1,71 @@
 # Skill Hub
 
-AI 驱动的技能共享平台（React + Go），支持 Skill/MCP/Rules/Tools 上传、AI 审核、收藏点赞、下载统计、以及 Skill 到 GitHub 仓库同步。
+AI 驱动的技能共享平台（React + Go），支持 Skill/MCP/Rules/Tools 上传、AI 审核、收藏点赞、下载统计，以及 Skill 到 GitHub 仓库同步。
 
-## 快速开始
+## 开发模式
 
-### 重制数据库
+当前仓库统一采用 PostgreSQL，并使用版本化 SQL migration 管理表结构。
 
-```bash
-./scripts/clear-db-data.sh
-```
+关键原则：
 
-### Docker 启动（推荐）
+- 后端启动时不自动改表
+- 本地先起数据库，再执行 migration
+- 共享环境和生产环境部署时先跑 migration，再发布 backend，再发布 frontend
 
-前提：
-- Docker Desktop/Engine 已启动（`docker info` 正常）
-- 端口 `3000` 可用
+## 本地快速开始
 
-```bash
-cp backend/.env.example backend/.env
-# 编辑 backend/.env（至少建议配置 JWT_SECRET，按需配置 OPENAI / GitHub）
-
-docker compose up -d --build
-docker compose ps
-docker compose logs -f backend
-```
-
-访问：
-- 前端: `http://localhost:3000`
-- API（经 Nginx 反代）: `http://localhost:3000/api/...`
-
-停止：
+### 1. 准备环境文件
 
 ```bash
-docker compose down
+cp backend/.env.local.example backend/.env.local
+cp frontend/.env.local.example frontend/.env.local
 ```
 
-### Development（本地开发）
+至少确认这些变量：
 
-环境要求：
-- Go `1.25+`
-- Node.js `20+`
-- npm `10+`
+- `backend/.env.local`
+  - `DATABASE_URL`
+  - `JWT_SECRET`
+- `frontend/.env.local`
+  - `VITE_API_BASE_URL`
 
-首次准备：
+### 2. 启动本地数据库基础设施
 
 ```bash
-cp backend/.env.example backend/.env
-# 按需编辑 backend/.env（JWT_SECRET / OPENAI / GitHub）
+./scripts/db-local.sh
 ```
 
-启动后端（终端 1）：
+这会启动：
+
+- PostgreSQL
+- Redis
+
+本地基础设施定义在：
+
+- `infra/docker/compose.local.yml`
+
+### 3. 执行全量 migration
+
+```bash
+./scripts/run-all-migrations.sh
+```
+
+### 4. 可选：灌本地测试数据
+
+```bash
+./scripts/seed-local.sh
+```
+
+### 5. 启动后端和前端
+
+后端：
 
 ```bash
 cd backend
 go run cmd/server/main.go
 ```
 
-启动前端（终端 2）：
+前端：
 
 ```bash
 cd frontend
@@ -64,125 +73,135 @@ npm install
 npm run dev
 ```
 
-开发访问地址：
+访问地址：
+
 - 前端（Vite）：`http://localhost:5173`
 - 后端 API：`http://localhost:8080/api/...`
-- 前端已配置 `/api` 代理到 `http://localhost:8080`
 
-常用开发命令：
+## 测试说明
+
+backend 测试现在统一跑在 PostgreSQL 上。
+
+执行前提：
+
+- 本地 PostgreSQL 已启动
+- migration 已执行
+
+推荐顺序：
 
 ```bash
-# 清空本地数据（重置 SQLite + 上传目录）
-./scripts/clear-db-data.sh
-
-# 后端测试
+./scripts/db-local.sh
+./scripts/run-all-migrations.sh
 cd backend && go test ./...
-
-# 前端构建校验
-cd frontend && npm run build
 ```
 
+说明：
+
+- 不需要先启动 `go run cmd/server/main.go`
+- 不需要先启动 `npm run dev`
+- 测试只依赖可访问的 PostgreSQL，不依赖前后端开发服务
+
+## GitHub Actions
+
+仓库内已提供实际可运行的 GitHub Actions 校验流水线：
+
+- `.github/workflows/verify.yml`
+
+它会执行：
+
+- PostgreSQL service + migration + backend tests
+- frontend build
+
+详细说明见 [GITHUB_ACTIONS.md](./GITHUB_ACTIONS.md)。
+
+## 本地重置数据
+
+```bash
+./scripts/clear-db-data.sh
+```
+
+该脚本会：
+
+- 清空 PostgreSQL 中的业务数据
+- 清空本地头像、缩略图和上传目录内容
+
+## 迁移规范
+
+所有业务表结构都放在：
+
+- `db/migrations/`
+
+约定：
+
+- `db/init/` 只做本地数据库初始化和扩展启用
+- `db/migrations/` 是唯一业务 schema 来源
+- `db/seed/` 只放本地或测试用数据
+
+新增 migration 的标准方式：
+
+1. 新建 `db/migrations/NNNN_description.up.sql`
+2. 新建 `db/migrations/NNNN_description.down.sql`
+3. 本地跑 `./scripts/run-all-migrations.sh`
+4. 验证后端测试和前端构建
+
+对于重命名字段、删字段、改类型这类破坏性变化，使用 expand-and-contract：
+
+1. 先加新列
+2. 再回填数据
+3. 再切换代码读写
+4. 最后再删旧列
+
+## 部署流程
+
+共享环境和生产环境统一遵守：
+
+```text
+migrate -> backend -> frontend
+```
+
+不要依赖：
+
+- 应用启动时自动建表
+- `AutoMigrate`
+- SQLite 文件数据库
+
+部署前请先准备：
+
+- 外部 PostgreSQL
+- 外部或可选 Redis
+- backend 运行时环境变量
+- frontend 公开环境变量
+
+详细说明见 [DEPLOYMENT.md](./DEPLOYMENT.md)。
+
+## 资源与发布规则
+
 资源路由约定：
+
 - 列表页：`/resource/{skill|rules|mcp|tools}`
 - 上传页：`/resource/{type}/upload`
 - 详情页：`/resource/{type}/{id}`
-- 兼容路由：`/upload`、`/skill/:id` 会重定向到新路由
+- 兼容路由：`/upload`、`/skill/:id`
 
 上传行为：
+
 - `skill`：文件/文件夹上传，AI 审核 + 人工复核
 - `rules`：仅 `.md/.txt` 或粘贴 Markdown，AI 审核 + 人工复核
 - `mcp`：文章型发布（metadata），无 review，可填 GitHub 链接
 - `tools`：文章型发布（metadata/file），无 review，可附压缩包
 
-## 上传与 GitHub 同步规则
-
 仅 `resource_type=skill` 会同步 GitHub（`GITHUB_SYNC_ENABLED=true` 时生效）。
-
-路径规则：
-- 单文件上传：`<GITHUB_BASE_DIR>/<技能名>/<文件名>`
-- 文件夹上传：始终以“技能名”作为根目录，本地文件夹名会被忽略
-- 文件夹内部层级会保留：例如 `src/main.md`
-
-冲突策略：
-- 同名技能目录已存在时，后端返回 `409`，前端提示“请修改技能名称后重试”
-- 不再自动加时间戳重命名
-
-字符策略：
-- 支持中文技能名和中文文件名，不强制英文化
-
-删除策略：
-- 优先按上传时记录的 GitHub 文件清单精确删除
-- 兼容老数据：无清单时回退到旧路径删除逻辑
-
-## 核心功能
-
-- 上传单文件/文件夹，支持自定义缩略图
-- AI 审核 + AI 推荐对话
-- 收藏、点赞、下载统计
-- Skill 与 GitHub 双向一致性删除
-- Redis 缓存可选（未配置时自动回退数据库）
-
-## API 概览
-
-```text
-POST   /api/auth/register
-POST   /api/auth/login
-GET    /api/auth/me
-
-GET    /api/skills
-GET    /api/skills/:id
-POST   /api/skills
-PUT    /api/skills/:id
-DELETE /api/skills/:id
-GET    /api/skills/:id/review-status
-POST   /api/skills/:id/review/retry
-POST   /api/skills/:id/human-review
-
-GET    /api/rules
-GET    /api/rules/:id
-POST   /api/rules
-PUT    /api/rules/:id
-DELETE /api/rules/:id
-GET    /api/rules/:id/review-status
-POST   /api/rules/:id/review/retry
-POST   /api/rules/:id/human-review
-
-GET    /api/mcps
-GET    /api/mcps/:id
-POST   /api/mcps
-PUT    /api/mcps/:id
-DELETE /api/mcps/:id
-
-GET    /api/tools
-GET    /api/tools/:id
-POST   /api/tools
-PUT    /api/tools/:id
-DELETE /api/tools/:id
-
-POST   /api/skills/:id/like
-POST   /api/skills/:id/favorite
-DELETE /api/skills/:id/favorite
-GET    /api/me/favorites
-
-GET    /api/skills/:id/download
-POST   /api/skills/:id/download-hit
-GET    /api/skills/trending
-
-POST   /api/content-assets/images
-GET    /api/content-assets/:filename
-
-POST   /api/ai/chat
-GET    /api/thumbnails/:filename
-GET    /api/avatars/:filename
-```
 
 ## 环境变量
 
+### Backend
+
 | 变量 | 默认值 | 说明 |
 |---|---|---|
+| `APP_ENV` | `local` | 运行环境标识 |
 | `PORT` | `8080` | 后端端口 |
-| `JWT_SECRET` | `skill-hub-default-secret-change-me` | JWT 签名密钥（生产必须修改） |
-| `DB_PATH` | `./skill_hub.db` | SQLite 路径 |
+| `DATABASE_URL` | `postgres://skillhub:skillhub@localhost:5432/skillhub_local?sslmode=disable` | PostgreSQL 连接串 |
+| `JWT_SECRET` | `change-me-in-production` | JWT 签名密钥 |
 | `UPLOAD_DIR` | `./uploads` | 上传目录 |
 | `THUMBNAIL_DIR` | `./thumbnails` | 缩略图目录 |
 | `OPENAI_API_KEY` | 空 | OpenAI Key |
@@ -194,25 +213,43 @@ GET    /api/avatars/:filename
 | `GITHUB_REPO` | 空 | 目标 repo |
 | `GITHUB_BRANCH` | `main` | 同步分支 |
 | `GITHUB_BASE_DIR` | `skills` | 仓库根目录 |
-| `REDIS_ADDR` | 空 | Redis 地址，例如 `redis:6379` |
+| `REDIS_ADDR` | 空 | Redis 地址，例如 `localhost:6379` |
 | `REDIS_PASSWORD` | 空 | Redis 密码 |
 | `REDIS_DB` | `0` | Redis DB |
 | `AI_SKILLS_CACHE_KEY` | `ai:skills_context:v1` | AI 上下文缓存键 |
 | `AI_SKILLS_INVALIDATE_CHANNEL` | `ai:skills_context:invalidate` | AI 上下文失效广播 |
 
-## Docker 结构说明
+### Frontend
 
-- `frontend`：Nginx 提供静态页面，并将 `/api` 反代到 `backend:8080`
-- `backend`：Go API + SQLite + GitHub/OpenAI 集成
-- `redis`：可选缓存
-- 前端字体（`Fira Sans` / `Fira Code` / `Didact Gothic`）已本地化到 `frontend/public/fonts`，运行时不依赖 Google Fonts 外链
-- 数据卷：
-  - `db_data` -> `/app/data`
-  - `uploads` -> `/app/uploads`（含正文图片资源 `content-assets`）
-  - `thumbnails` -> `/app/thumbnails`
-  - `avatars` -> `/app/avatars`
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `VITE_APP_ENV` | `local` | 前端运行环境标识 |
+| `VITE_API_BASE_URL` | `http://localhost:8080` | 后端基础地址，前端会自动补 `/api` |
+
+## 数据去向
+
+默认情况下：
+
+- 结构化业务数据在 PostgreSQL
+- 上传文件在后端文件系统目录
+- 缩略图在后端文件系统目录
+- 头像在后端文件系统目录
+- Redis 仅作为可选缓存
+
+如果开启 GitHub 同步：
+
+- `skill` 资源会同步到 GitHub 仓库
+
+如果开启 OpenAI：
+
+- 审核与推荐请求会发送到外部 AI 服务
 
 ## 文档
 
 - GitHub 同步配置: [GITHUB_SYNC_SETUP.md](./GITHUB_SYNC_SETUP.md)
 - 部署指南（生产环境）: [DEPLOYMENT.md](./DEPLOYMENT.md)
+- 架构总览: [ARCHITECTURE.md](./ARCHITECTURE.md)
+- GitHub Actions 说明: [GITHUB_ACTIONS.md](./GITHUB_ACTIONS.md)
+- CI/CD 模板说明: [CI_CD_TEMPLATE.md](./CI_CD_TEMPLATE.md)
+- 设计文档: `docs/plans/2026-03-08-postgresql-migration-architecture-design.md`
+- 实施计划: `docs/plans/2026-03-08-postgresql-migration-implementation-plan.md`

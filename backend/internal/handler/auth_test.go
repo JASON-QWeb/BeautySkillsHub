@@ -7,27 +7,19 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"skill-hub/internal/model"
+	"skill-hub/internal/testutil"
 
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
 )
 
 func newAuthTestRouter(t *testing.T) *gin.Engine {
 	t.Helper()
 
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	if err := db.AutoMigrate(&model.User{}); err != nil {
-		t.Fatalf("migrate user: %v", err)
-	}
+	tdb := testutil.OpenPostgresTestDB(t)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.POST("/auth/register", NewAuthHandler(db, t.TempDir()).Register)
+	r.POST("/auth/register", NewAuthHandler(tdb.DB, t.TempDir()).Register)
 	return r
 }
 
@@ -48,12 +40,8 @@ func TestRegisterRejectsWhitespaceOnlyUsername(t *testing.T) {
 func TestNewAuthHandler_UsesNonDefaultSecretWhenEnvMissing(t *testing.T) {
 	t.Setenv("JWT_SECRET", "")
 
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-
-	h := NewAuthHandler(db, t.TempDir())
+	tdb := testutil.OpenPostgresTestDB(t)
+	h := NewAuthHandler(tdb.DB, t.TempDir())
 	if len(h.secret) == 0 {
 		t.Fatal("expected generated secret, got empty")
 	}

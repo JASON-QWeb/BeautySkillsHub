@@ -28,18 +28,18 @@ type Skill struct {
 	AIReviewCompletedAt *time.Time `json:"ai_review_completed_at"`
 	AIReviewDetails     string     `json:"ai_review_details" gorm:"type:text"`
 	AIFeedback          string     `json:"ai_feedback" gorm:"type:text"`
-	AIDescription       string     `json:"ai_description" gorm:"type:text"`
+	AIDescription       string     `json:"ai_description" gorm:"column:ai_description;type:text"`
 	HumanReviewStatus   string     `json:"human_review_status" gorm:"size:32;default:pending;index"`
 	HumanReviewerID     *uint      `json:"human_reviewer_id" gorm:"index"`
 	HumanReviewer       string     `json:"human_reviewer" gorm:"size:100"`
 	HumanReviewFeedback string     `json:"human_review_feedback" gorm:"type:text"`
 	HumanReviewedAt     *time.Time `json:"human_reviewed_at"`
 	Published           bool       `json:"published" gorm:"default:false;index"`
-	GitHubPath          string     `json:"github_path" gorm:"size:1024"`
-	GitHubURL           string     `json:"github_url" gorm:"size:1024"`
-	GitHubFiles         string     `json:"github_files" gorm:"type:text"`
-	GitHubSyncStatus    string     `json:"github_sync_status" gorm:"size:32;default:disabled"`
-	GitHubSyncError     string     `json:"github_sync_error" gorm:"type:text"`
+	GitHubPath          string     `json:"github_path" gorm:"column:github_path;size:1024"`
+	GitHubURL           string     `json:"github_url" gorm:"column:github_url;size:1024"`
+	GitHubFiles         string     `json:"github_files" gorm:"column:github_files;type:text"`
+	GitHubSyncStatus    string     `json:"github_sync_status" gorm:"column:github_sync_status;size:32;default:disabled"`
+	GitHubSyncError     string     `json:"github_sync_error" gorm:"column:github_sync_error;type:text"`
 	CreatedAt           time.Time  `json:"created_at"`
 	UpdatedAt           time.Time  `json:"updated_at"`
 }

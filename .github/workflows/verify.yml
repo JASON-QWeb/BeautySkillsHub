@@ -1,0 +1,69 @@
+name: Verify
+
+on:
+  push:
+    branches:
+      - main
+      - 'codex/**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-test:
+    name: Backend Test
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://skillhub:skillhub@localhost:5432/skillhub_ci?sslmode=disable
+      TEST_DATABASE_URL: postgres://skillhub:skillhub@localhost:5432/skillhub_ci?sslmode=disable
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: skillhub
+          POSTGRES_PASSWORD: skillhub
+          POSTGRES_DB: skillhub_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U skillhub -d skillhub_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Run migrations
+        run: ./scripts/run-all-migrations.sh
+
+      - name: Run backend tests
+        run: cd backend && go test ./...
+
+  frontend-build:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: cd frontend && npm ci
+
+      - name: Build frontend
+        run: cd frontend && npm run build

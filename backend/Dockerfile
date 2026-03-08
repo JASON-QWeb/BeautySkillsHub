@@ -19,7 +19,7 @@ WORKDIR /app
 COPY --from=builder /app/server .
 COPY .env.example .env.example
 
-RUN mkdir -p data uploads thumbnails avatars
+RUN mkdir -p uploads thumbnails avatars
 
 EXPOSE 8080
 

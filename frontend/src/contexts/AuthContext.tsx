@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react'
+import { API_BASE } from '../services/api/client'
 
 export interface User {
     id: number
@@ -17,8 +18,6 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
-
-const API_BASE = '/api'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<User | null>(null)
