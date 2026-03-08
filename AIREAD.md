@@ -93,9 +93,3 @@ cd frontend && npm run test:node
 - `db/`: migrations、seed、schema 文档
 - `scripts/`: 本地运行与维护脚本
 - `docker-compose.yml`: 最快本地启动入口
-
-## 7. 改动文档时的约束
-
-- 公开仓库优先保留对外可用的说明，不保留个人部署笔记和内部评审记录。
-- 需要启动说明时，优先更新 `README.md` 和 `AIREAD.md`。
-- 需要子模块细节时，再更新对应目录下的 `README.md`。

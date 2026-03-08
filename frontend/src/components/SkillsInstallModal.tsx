@@ -168,27 +168,6 @@ export function SkillsInstallModal({ isOpen, onClose }: SkillsInstallModalProps)
                             💡 <strong>推荐流程：</strong>先执行 <code>check</code> 预览可更新项，确认无误后再执行 <code>update</code> 完成批量升级。
                         </div>
                     </section>
-
-                    <section className="skills-install-step" style={{ borderTop: '1px dashed var(--border)', paddingTop: '20px', marginTop: '20px' }}>
-                        <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
-                            <div>
-                                <h4 style={{ margin: '0 0 8px 0', fontSize: '0.95rem', color: 'var(--accent-primary)' }}>Cline 用户小贴士</h4>
-                                <p style={{ margin: 0, fontSize: '0.85rem', lineHeight: 1.5, opacity: 0.9 }}>
-                                    如果你想让这些技能在 <strong>Cline</strong> 中生效，需要将它们移动到 Cline 的专用技能目录下。请在终端执行以下指令：
-                                </p>
-                                <div className="skills-install-command-row" style={{ marginTop: '10px', background: 'rgba(0,0,0,0.2)' }}>
-                                    <code style={{ fontSize: '0.8rem' }}>mkdir -p .cline/skills && mv .agents/skills/* .cline/skills/</code>
-                                    <button
-                                        type="button"
-                                        style={{ padding: '2px 8px', fontSize: '0.75rem' }}
-                                        onClick={() => void copyCommand('mkdir -p .cline/skills && mv .agents/skills/* .cline/skills/', 'cline')}
-                                    >
-                                        {copiedKey === 'cline' ? '已复制' : '复制'}
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
                 </div>
             </div>
         </div>
