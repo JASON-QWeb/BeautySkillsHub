@@ -1,18 +1,35 @@
 # Skill Hub
 
-AI 驱动的技能共享平台（React + Go），支持 Skill/MCP/Rules/Tools 上传、AI 审核、收藏点赞、下载统计，以及 Skill 到 GitHub 仓库同步。
+Skill Hub 是一套前后端分离的技能资源平台，支持：
 
-## 开发模式
+- `skill / rules / mcp / tools` 四类资源发布
+- AI 审核与人工复核
+- 收藏、点赞、下载统计
+- 可选 GitHub 同步
+- PostgreSQL + migration-first 数据库管理
 
-当前仓库统一采用 PostgreSQL，并使用版本化 SQL migration 管理表结构。
+当前仓库已经统一切换到 PostgreSQL。数据库结构变更通过版本化 SQL migration 管理，后端启动时不再自动改表。
 
-关键原则：
+## 先看这里
 
-- 后端启动时不自动改表
-- 本地先起数据库，再执行 migration
-- 共享环境和生产环境部署时先跑 migration，再发布 backend，再发布 frontend
+如果你第一次接手这个项目，按下面顺序看：
 
-## 本地快速开始
+1. [README.md](./README.md)：本地启动、测试、项目入口
+2. [ARCHITECTURE.md](./ARCHITECTURE.md)：整体架构、目录边界、数据流
+3. [DEPLOYMENT.md](./DEPLOYMENT.md)：如何部署到共享环境或生产环境
+4. [GITHUB_ACTIONS.md](./GITHUB_ACTIONS.md)：仓库内 GitHub Actions 校验流水线
+5. [CI_CD_TEMPLATE.md](./CI_CD_TEMPLATE.md)：企业内部 CI/CD 扩展模板
+
+## 本地启动
+
+### 前置要求
+
+本地建议准备：
+
+- Docker Desktop / Docker Engine
+- Go `1.25+`
+- Node.js `20+`
+- npm `10+`
 
 ### 1. 准备环境文件
 
@@ -21,7 +38,7 @@ cp backend/.env.local.example backend/.env.local
 cp frontend/.env.local.example frontend/.env.local
 ```
 
-至少确认这些变量：
+最关键的变量：
 
 - `backend/.env.local`
   - `DATABASE_URL`
@@ -35,7 +52,7 @@ cp frontend/.env.local.example frontend/.env.local
 ./scripts/db-local.sh
 ```
 
-这会启动：
+这一步会启动：
 
 - PostgreSQL
 - Redis
@@ -43,51 +60,67 @@ cp frontend/.env.local.example frontend/.env.local
 本地基础设施定义在：
 
 - `infra/docker/compose.local.yml`
+- 根目录 `docker-compose.yml` 也保留为本地基础设施入口
 
-### 3. 执行全量 migration
+注意：
+
+- 这里启动的是数据库和缓存，不是前后端业务服务
+- 本地开发默认前后端单独运行，方便调试
+
+### 3. 执行 migration
 
 ```bash
 ./scripts/run-all-migrations.sh
 ```
 
-### 4. 可选：灌本地测试数据
+### 4. 可选：灌本地种子数据
 
 ```bash
 ./scripts/seed-local.sh
 ```
 
-### 5. 启动后端和前端
-
-后端：
+### 5. 启动 backend
 
 ```bash
 cd backend
 go run cmd/server/main.go
 ```
 
-前端：
+### 6. 启动 frontend
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
-访问地址：
+### 本地访问地址
 
-- 前端（Vite）：`http://localhost:5173`
+- 前端：`http://localhost:5173`
 - 后端 API：`http://localhost:8080/api/...`
+- PostgreSQL：`localhost:5432`
+- Redis：`localhost:6379`
 
-## 测试说明
+## 本地日常命令
 
-backend 测试现在统一跑在 PostgreSQL 上。
+### 重新跑 migration
 
-执行前提：
+```bash
+./scripts/run-all-migrations.sh
+```
 
-- 本地 PostgreSQL 已启动
-- migration 已执行
+### 重置本地业务数据
 
-推荐顺序：
+```bash
+./scripts/clear-db-data.sh
+```
+
+这个脚本会：
+
+- 清空 PostgreSQL 里的业务数据
+- 清空本地头像、缩略图、上传目录内容
+
+### backend 测试
 
 ```bash
 ./scripts/db-local.sh
@@ -97,15 +130,89 @@ cd backend && go test ./...
 
 说明：
 
+- backend 测试现在统一跑在 PostgreSQL 上
 - 不需要先启动 `go run cmd/server/main.go`
 - 不需要先启动 `npm run dev`
-- 测试只依赖可访问的 PostgreSQL，不依赖前后端开发服务
+
+### frontend 构建校验
+
+```bash
+cd frontend && npm run build
+```
+
+## 项目结构
+
+```text
+Skill_Hub/
+├── backend/                 Go API、业务逻辑、数据库访问、测试
+├── frontend/                React + Vite 前端
+├── db/
+│   ├── init/                本地 PostgreSQL 初始化脚本
+│   ├── migrations/          版本化 SQL migration
+│   └── seed/                本地演示/测试数据
+├── infra/
+│   └── docker/              本地 PostgreSQL / Redis 编排
+├── scripts/                 本地数据库、迁移、清理脚本
+├── .github/workflows/       GitHub Actions 校验流水线
+└── docs/plans/              设计与实施计划文档
+```
+
+详细说明见 [ARCHITECTURE.md](./ARCHITECTURE.md)。
+
+## 架构原则
+
+当前仓库遵守这些约束：
+
+- backend 启动时不自动改表
+- 所有业务 schema 只来自 `db/migrations/`
+- `db/init/` 只做本地数据库初始化，不承担业务建表
+- `db/seed/` 只用于本地或测试数据
+- 共享环境和生产环境遵循：
+
+```text
+migrate -> backend -> frontend
+```
+
+## 环境变量
+
+### Backend
+
+后端使用运行时环境变量。关键变量：
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `APP_ENV` | `local` | 运行环境标识 |
+| `PORT` | `8080` | 后端端口 |
+| `DATABASE_URL` | `postgres://skillhub:skillhub@localhost:5432/skillhub_local?sslmode=disable` | PostgreSQL 连接串 |
+| `JWT_SECRET` | `change-me-in-production` | JWT 签名密钥 |
+| `REDIS_ADDR` | 空 | Redis 地址 |
+| `OPENAI_API_KEY` | 空 | OpenAI Key |
+| `GITHUB_SYNC_ENABLED` | `false` | 是否开启 GitHub 同步 |
+
+本地参考：
+
+- [backend/.env.local.example](./backend/.env.local.example)
+- [backend/.env.example](./backend/.env.example)
+
+### Frontend
+
+前端只允许公开配置：
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `VITE_APP_ENV` | `local` | 前端环境标识 |
+| `VITE_API_BASE_URL` | `http://localhost:8080` | 后端基础地址；前端会自动补 `/api` |
+
+本地参考：
+
+- [frontend/.env.local.example](./frontend/.env.local.example)
+- [frontend/.env.example](./frontend/.env.example)
 
 ## GitHub Actions
 
-仓库内已提供实际可运行的 GitHub Actions 校验流水线：
+仓库内已经有实际可运行的 GitHub Actions workflow：
 
-- `.github/workflows/verify.yml`
+- [`.github/workflows/verify.yml`](./.github/workflows/verify.yml)
 
 它会执行：
 
@@ -114,126 +221,26 @@ cd backend && go test ./...
 
 详细说明见 [GITHUB_ACTIONS.md](./GITHUB_ACTIONS.md)。
 
-## 本地重置数据
+## 部署摘要
 
-```bash
-./scripts/clear-db-data.sh
-```
+如果你要把它部署到共享环境或生产环境：
 
-该脚本会：
+1. 准备外部 PostgreSQL
+2. 配置 backend 环境变量
+3. 先执行 migration
+4. 再发布 backend
+5. 最后发布 frontend
 
-- 清空 PostgreSQL 中的业务数据
-- 清空本地头像、缩略图和上传目录内容
-
-## 迁移规范
-
-所有业务表结构都放在：
-
-- `db/migrations/`
-
-约定：
-
-- `db/init/` 只做本地数据库初始化和扩展启用
-- `db/migrations/` 是唯一业务 schema 来源
-- `db/seed/` 只放本地或测试用数据
-
-新增 migration 的标准方式：
-
-1. 新建 `db/migrations/NNNN_description.up.sql`
-2. 新建 `db/migrations/NNNN_description.down.sql`
-3. 本地跑 `./scripts/run-all-migrations.sh`
-4. 验证后端测试和前端构建
-
-对于重命名字段、删字段、改类型这类破坏性变化，使用 expand-and-contract：
-
-1. 先加新列
-2. 再回填数据
-3. 再切换代码读写
-4. 最后再删旧列
-
-## 部署流程
-
-共享环境和生产环境统一遵守：
-
-```text
-migrate -> backend -> frontend
-```
-
-不要依赖：
-
-- 应用启动时自动建表
-- `AutoMigrate`
-- SQLite 文件数据库
-
-部署前请先准备：
-
-- 外部 PostgreSQL
-- 外部或可选 Redis
-- backend 运行时环境变量
-- frontend 公开环境变量
-
-详细说明见 [DEPLOYMENT.md](./DEPLOYMENT.md)。
-
-## 资源与发布规则
-
-资源路由约定：
-
-- 列表页：`/resource/{skill|rules|mcp|tools}`
-- 上传页：`/resource/{type}/upload`
-- 详情页：`/resource/{type}/{id}`
-- 兼容路由：`/upload`、`/skill/:id`
-
-上传行为：
-
-- `skill`：文件/文件夹上传，AI 审核 + 人工复核
-- `rules`：仅 `.md/.txt` 或粘贴 Markdown，AI 审核 + 人工复核
-- `mcp`：文章型发布（metadata），无 review，可填 GitHub 链接
-- `tools`：文章型发布（metadata/file），无 review，可附压缩包
-
-仅 `resource_type=skill` 会同步 GitHub（`GITHUB_SYNC_ENABLED=true` 时生效）。
-
-## 环境变量
-
-### Backend
-
-| 变量 | 默认值 | 说明 |
-|---|---|---|
-| `APP_ENV` | `local` | 运行环境标识 |
-| `PORT` | `8080` | 后端端口 |
-| `DATABASE_URL` | `postgres://skillhub:skillhub@localhost:5432/skillhub_local?sslmode=disable` | PostgreSQL 连接串 |
-| `JWT_SECRET` | `change-me-in-production` | JWT 签名密钥 |
-| `UPLOAD_DIR` | `./uploads` | 上传目录 |
-| `THUMBNAIL_DIR` | `./thumbnails` | 缩略图目录 |
-| `OPENAI_API_KEY` | 空 | OpenAI Key |
-| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI Base URL |
-| `OPENAI_MODEL` | `gpt-4o-mini` | AI 模型 |
-| `GITHUB_SYNC_ENABLED` | `false` | 是否开启 Skill GitHub 同步 |
-| `GITHUB_TOKEN` | 空 | GitHub PAT（contents 读写权限） |
-| `GITHUB_OWNER` | 空 | 目标 owner/org |
-| `GITHUB_REPO` | 空 | 目标 repo |
-| `GITHUB_BRANCH` | `main` | 同步分支 |
-| `GITHUB_BASE_DIR` | `skills` | 仓库根目录 |
-| `REDIS_ADDR` | 空 | Redis 地址，例如 `localhost:6379` |
-| `REDIS_PASSWORD` | 空 | Redis 密码 |
-| `REDIS_DB` | `0` | Redis DB |
-| `AI_SKILLS_CACHE_KEY` | `ai:skills_context:v1` | AI 上下文缓存键 |
-| `AI_SKILLS_INVALIDATE_CHANNEL` | `ai:skills_context:invalidate` | AI 上下文失效广播 |
-
-### Frontend
-
-| 变量 | 默认值 | 说明 |
-|---|---|---|
-| `VITE_APP_ENV` | `local` | 前端运行环境标识 |
-| `VITE_API_BASE_URL` | `http://localhost:8080` | 后端基础地址，前端会自动补 `/api` |
+完整步骤见 [DEPLOYMENT.md](./DEPLOYMENT.md)。
 
 ## 数据去向
 
 默认情况下：
 
-- 结构化业务数据在 PostgreSQL
-- 上传文件在后端文件系统目录
-- 缩略图在后端文件系统目录
-- 头像在后端文件系统目录
+- 结构化业务数据存储在 PostgreSQL
+- 上传文件存储在后端文件系统目录
+- 缩略图存储在后端文件系统目录
+- 头像存储在后端文件系统目录
 - Redis 仅作为可选缓存
 
 如果开启 GitHub 同步：
@@ -244,12 +251,13 @@ migrate -> backend -> frontend
 
 - 审核与推荐请求会发送到外部 AI 服务
 
-## 文档
+## 相关文档
 
 - GitHub 同步配置: [GITHUB_SYNC_SETUP.md](./GITHUB_SYNC_SETUP.md)
-- 部署指南（生产环境）: [DEPLOYMENT.md](./DEPLOYMENT.md)
 - 架构总览: [ARCHITECTURE.md](./ARCHITECTURE.md)
-- GitHub Actions 说明: [GITHUB_ACTIONS.md](./GITHUB_ACTIONS.md)
-- CI/CD 模板说明: [CI_CD_TEMPLATE.md](./CI_CD_TEMPLATE.md)
-- 设计文档: `docs/plans/2026-03-08-postgresql-migration-architecture-design.md`
-- 实施计划: `docs/plans/2026-03-08-postgresql-migration-implementation-plan.md`
+- 部署指南: [DEPLOYMENT.md](./DEPLOYMENT.md)
+- GitHub Actions: [GITHUB_ACTIONS.md](./GITHUB_ACTIONS.md)
+- 企业 CI/CD 模板: [CI_CD_TEMPLATE.md](./CI_CD_TEMPLATE.md)
+- PostgreSQL 架构设计: [docs/plans/2026-03-08-postgresql-migration-architecture-design.md](./docs/plans/2026-03-08-postgresql-migration-architecture-design.md)
+- PostgreSQL 实施计划: [docs/plans/2026-03-08-postgresql-migration-implementation-plan.md](./docs/plans/2026-03-08-postgresql-migration-implementation-plan.md)
+- PostgreSQL 测试统一计划: [docs/plans/2026-03-08-postgresql-test-unification-plan.md](./docs/plans/2026-03-08-postgresql-test-unification-plan.md)
