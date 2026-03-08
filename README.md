@@ -43,10 +43,51 @@ cp frontend/.env.local.example frontend/.env.local
 - `backend/.env.local`
   - `DATABASE_URL`
   - `JWT_SECRET`
-- `frontend/.env.local`
-  - `VITE_API_BASE_URL`
 
-### 2. 启动本地数据库基础设施
+### 2. 方式 A：Docker Compose 一键启动整套本地环境
+
+```bash
+docker compose up -d --build
+```
+
+这条命令会启动：
+
+- PostgreSQL
+- Redis
+- migration 一次性任务
+- backend
+- frontend
+
+查看关键服务日志：
+
+```bash
+docker compose logs -f migrate backend frontend
+```
+
+停止整套容器：
+
+```bash
+docker compose down
+```
+
+说明：
+
+- migration 会在 compose 启动时自动执行
+- `seed` 不会自动执行，避免每次重启容器都灌演示数据
+- 根目录 [docker-compose.yml](./docker-compose.yml) 现在是完整本地栈入口
+
+如果你想手动加入本地 seed，在容器已经启动后执行：
+
+```bash
+docker compose exec -T postgres \
+  psql -v ON_ERROR_STOP=1 -U skillhub -d skillhub_local < db/seed/local_seed.sql
+```
+
+### 3. 方式 B：脚本启动数据库，前后端跑宿主机进程
+
+如果你更希望前后端直接在本机跑，方便调试代码：
+
+#### 3.1 启动本地数据库基础设施
 
 ```bash
 ./scripts/db-local.sh
@@ -57,41 +98,57 @@ cp frontend/.env.local.example frontend/.env.local
 - PostgreSQL
 - Redis
 
-本地基础设施定义在：
+数据库和缓存定义在：
 
 - `infra/docker/compose.local.yml`
-- 根目录 `docker-compose.yml` 也保留为本地基础设施入口
 
-注意：
-
-- 这里启动的是数据库和缓存，不是前后端业务服务
-- 本地开发默认前后端单独运行，方便调试
-
-### 3. 执行 migration
+#### 3.2 执行 migration
 
 ```bash
 ./scripts/run-all-migrations.sh
 ```
 
-### 4. 可选：灌本地种子数据
+#### 3.3 可选：灌本地种子数据
 
 ```bash
 ./scripts/seed-local.sh
 ```
 
-### 5. 启动 backend
+#### 3.4 启动 backend
 
 ```bash
 cd backend
 go run cmd/server/main.go
 ```
 
-### 6. 启动 frontend
+#### 3.5 启动 frontend
 
 ```bash
 cd frontend
 npm ci
 npm run dev
+```
+
+### 4. 方式 C：一个 terminal 跑完整套宿主机开发流
+
+如果你想在一个 terminal 里把数据库、迁移、seed、backend、frontend 全部带起来：
+
+```bash
+./scripts/dev-all.sh
+```
+
+默认会执行：
+
+- `./scripts/db-local.sh`
+- `./scripts/run-all-migrations.sh`
+- `./scripts/seed-local.sh`
+- `go run ./cmd/server/main.go`
+- `npm run dev -- --host 0.0.0.0`
+
+如果你不想每次都执行 seed：
+
+```bash
+SEED_LOCAL=0 ./scripts/dev-all.sh
 ```
 
 ### 本地访问地址
@@ -192,7 +249,6 @@ migrate -> backend -> frontend
 本地参考：
 
 - [backend/.env.local.example](./backend/.env.local.example)
-- [backend/.env.example](./backend/.env.example)
 
 ### Frontend
 

@@ -2,6 +2,11 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+ARG VITE_APP_ENV=local
+ARG VITE_API_BASE_URL=/api
+ENV VITE_APP_ENV=$VITE_APP_ENV
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+
 COPY package.json package-lock.json ./
 RUN npm ci
 

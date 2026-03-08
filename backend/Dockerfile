@@ -17,7 +17,6 @@ RUN apk add --no-cache libc6-compat ca-certificates
 WORKDIR /app
 
 COPY --from=builder /app/server .
-COPY .env.example .env.example
 
 RUN mkdir -p uploads thumbnails avatars
 
