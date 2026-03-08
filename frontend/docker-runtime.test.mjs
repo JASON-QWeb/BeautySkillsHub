@@ -1,10 +1,17 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 function read(relativePath) {
-    return readFileSync(resolve(process.cwd(), relativePath), 'utf8')
+    return readFileSync(resolve(repoRoot, relativePath), 'utf8')
+}
+
+function readFrontendPackage() {
+    return JSON.parse(readFileSync(resolve(repoRoot, 'frontend/package.json'), 'utf8'))
 }
 
 test('backend container runs as a non-root user', () => {
@@ -39,9 +46,11 @@ test('docker compose boots locally without a private backend env file', () => {
 
 test('verify workflow checks docker runtime regressions and compose smoke startup', () => {
     const workflow = read('.github/workflows/verify.yml')
+    const pkg = readFrontendPackage()
 
-    assert.match(workflow, /node --test/)
-    assert.match(workflow, /frontend\/docker-runtime\.test\.mjs/)
+    assert.equal(pkg.scripts?.['test:node'], 'node ./scripts/run-node-tests.mjs')
+    assert.match(pkg.devDependencies?.tsx ?? '', /^\^4\./)
+    assert.match(workflow, /cd frontend && npm run test:node/)
     assert.match(workflow, /docker compose up -d --build/)
     assert.match(workflow, /curl -sf http:\/\/127\.0\.0\.1:8080\/health/)
     assert.match(workflow, /curl -I http:\/\/127\.0\.0\.1:5173/)

@@ -66,15 +66,7 @@ jobs:
         run: cd frontend && npm ci
 
       - name: Run frontend node tests
-        run: |
-          node --test \
-            frontend/src/services/api/request.test.ts \
-            frontend/src/features/skill-detail/readmeCache.test.ts \
-            frontend/src/contexts/dialogKeydown.test.ts \
-            frontend/src/components/aiMouseTracking.test.ts \
-            frontend/src/features/profile/profileActivity.test.ts \
-            frontend/src/features/upload/shared/tagInput.test.ts \
-            frontend/docker-runtime.test.mjs
+        run: cd frontend && npm run test:node
 
       - name: Build frontend
         run: cd frontend && npm run build

@@ -122,13 +122,7 @@ cd frontend && npm run build
 前端轻量回归测试也可直接跑：
 
 ```bash
-node --test frontend/src/services/api/request.test.ts \
-  frontend/src/features/skill-detail/readmeCache.test.ts \
-  frontend/src/contexts/dialogKeydown.test.ts \
-  frontend/src/components/aiMouseTracking.test.ts \
-  frontend/src/features/profile/profileActivity.test.ts \
-  frontend/src/features/upload/shared/tagInput.test.ts \
-  frontend/docker-runtime.test.mjs
+cd frontend && npm run test:node
 ```
 
 更多脚本、测试和本地维护命令见 [DEVELOPMENT.md](./DEVELOPMENT.md)。

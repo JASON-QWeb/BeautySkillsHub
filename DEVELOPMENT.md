@@ -200,13 +200,7 @@ cd frontend && npm ci && npm run build
 ### frontend 轻量 node 测试
 
 ```bash
-node --test frontend/src/services/api/request.test.ts \
-  frontend/src/features/skill-detail/readmeCache.test.ts \
-  frontend/src/contexts/dialogKeydown.test.ts \
-  frontend/src/components/aiMouseTracking.test.ts \
-  frontend/src/features/profile/profileActivity.test.ts \
-  frontend/src/features/upload/shared/tagInput.test.ts \
-  frontend/docker-runtime.test.mjs
+cd frontend && npm run test:node
 ```
 
 ### Docker 镜像验证
