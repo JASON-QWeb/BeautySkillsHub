@@ -6,6 +6,7 @@ import { useI18n } from '../../../i18n/I18nProvider'
 import { RESOURCE_TYPES } from '../../../services/api'
 import { Skill, SkillReviewStatusResponse, fetchSkill, fetchSkillReadme, fetchSkillReviewStatus, retrySkillReview, updateResourceFromUpload, uploadSkill } from '../../../services/api'
 import FlowStepIcon from '../../../components/FlowStepIcon'
+import { addTagItem, MAX_UPLOAD_TAGS, normalizeTagList, serializeTagList } from '../shared/tagInput'
 
 type RulesInputMode = 'file' | 'paste'
 type ReviewStatus = 'idle' | 'pending' | 'approved' | 'rejected'
@@ -21,7 +22,8 @@ function RulesUploadPage() {
 
     const [name, setName] = useState('')
     const [description, setDescription] = useState('')
-    const [tags, setTags] = useState('')
+    const [tagInput, setTagInput] = useState('')
+    const [tagItems, setTagItems] = useState<string[]>([])
     const [mode, setMode] = useState<RulesInputMode>('file')
     const [file, setFile] = useState<File | null>(null)
     const [markdownContent, setMarkdownContent] = useState('')
@@ -97,7 +99,8 @@ function RulesUploadPage() {
 
                 setName(skill.name || '')
                 setDescription(skill.description || '')
-                setTags(skill.tags || '')
+                setTagInput('')
+                setTagItems(normalizeTagList(skill.tags || ''))
                 if (readme.trim()) {
                     setMode('paste')
                     setMarkdownContent(readme)
@@ -122,6 +125,14 @@ function RulesUploadPage() {
         }
     }, [editId, isEditMode, navigate, showAlert, user])
 
+    const commitTagInput = () => {
+        setTagItems(prev => addTagItem(prev, tagInput))
+        setTagInput('')
+    }
+
+    const removeTag = (value: string) => {
+        setTagItems(prev => prev.filter(tag => tag !== value))
+    }
     const applyReviewStatus = (status: SkillReviewStatusResponse) => {
         setReviewMeta(status)
         if (status.status === 'queued' || status.status === 'running') {
@@ -177,8 +188,14 @@ function RulesUploadPage() {
         formData.append('description', description.trim())
         formData.append('resource_type', 'rules')
         formData.append('author', user?.username || 'Anonymous')
-        formData.append('tags', tags.trim())
+        const finalTagItems = addTagItem(tagItems, tagInput)
+        formData.append('tags', serializeTagList(finalTagItems))
         formData.append('upload_mode', mode === 'paste' ? 'paste' : 'file')
+
+        if (finalTagItems.length !== tagItems.length || tagInput.trim()) {
+            setTagItems(finalTagItems)
+            setTagInput('')
+        }
 
         if (mode === 'file' && file) {
             formData.append('file', file)
@@ -233,7 +250,8 @@ function RulesUploadPage() {
         clearReviewPolling()
         setName('')
         setDescription('')
-        setTags('')
+        setTagInput('')
+        setTagItems([])
         setFile(null)
         setMarkdownContent('')
         setMode('file')
@@ -326,11 +344,38 @@ function RulesUploadPage() {
                             <label className="upload-field">
                                 <span>{t('upload.tags')}</span>
                                 <input
-                                    value={tags}
-                                    onChange={e => setTags(e.target.value.toLowerCase())}
+                                    value={tagInput}
+                                    onChange={e => setTagInput(e.target.value)}
+                                    onKeyDown={e => {
+                                        if (e.key !== 'Enter') return
+                                        e.preventDefault()
+                                        commitTagInput()
+                                    }}
                                     placeholder={t('upload.tagsPlaceholder')}
-                                    disabled={uploading}
+                                    disabled={uploading || tagItems.length >= MAX_UPLOAD_TAGS}
                                 />
+                                <small className="upload-tag-counter">
+                                    {t('upload.tagHint')} {tagItems.length}/{MAX_UPLOAD_TAGS}
+                                </small>
+                                {tagItems.length >= MAX_UPLOAD_TAGS && (
+                                    <small className="upload-tag-limit">{t('upload.tagLimit')}</small>
+                                )}
+                                {tagItems.length > 0 && (
+                                    <div className="upload-tag-list">
+                                        {tagItems.map(tag => (
+                                            <button
+                                                key={tag}
+                                                type="button"
+                                                className="upload-tag-chip"
+                                                onClick={() => removeTag(tag)}
+                                                disabled={uploading}
+                                                aria-label={`${t('upload.removeTag')}: ${tag}`}
+                                            >
+                                                {tag} ×
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                             </label>
 
                             <div className="upload-mode-toggle">

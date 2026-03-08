@@ -107,11 +107,6 @@ func GenerateThumbnail(name, subtitle, thumbnailDir string) (string, error) {
 	drawCircle(img, width/2+60, height/2-30, 50, color.RGBA{255, 255, 255, 25})
 	drawCircle(img, 40, height-30, 35, color.RGBA{255, 255, 255, 18})
 
-	// Draw bottom dark overlay for text area
-	barRect := image.Rect(0, height-textPanelHeight, width, height)
-	darkOverlay := image.NewUniform(color.RGBA{0, 0, 0, 140})
-	draw.Draw(img, barRect, darkOverlay, image.Point{}, draw.Over)
-
 	// Safe filename
 	safeName := strings.ReplaceAll(strings.ToLower(name), " ", "_")
 	var sb strings.Builder
