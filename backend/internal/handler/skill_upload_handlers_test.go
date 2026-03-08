@@ -3,7 +3,9 @@ package handler
 import (
 	"net/http/httptest"
 	"mime/multipart"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -132,6 +134,45 @@ func TestValidateThumbnailHeader(t *testing.T) {
 	}
 }
 
+func TestSaveUploadedThumbnail_GeneratesUniqueNamesForSameResource(t *testing.T) {
+	dir := t.TempDir()
+	payload := []byte("fake image bytes")
+	header := &multipart.FileHeader{
+		Filename: "cover.png",
+		Size:     int64(len(payload)),
+	}
+
+	firstFile := newTempMultipartFile(t, payload)
+	defer firstFile.Close()
+	firstName, err := saveUploadedThumbnail("Same Name", firstFile, header, dir)
+	if err != nil {
+		t.Fatalf("save first thumbnail: %v", err)
+	}
+
+	secondFile := newTempMultipartFile(t, payload)
+	defer secondFile.Close()
+	secondName, err := saveUploadedThumbnail("Same Name", secondFile, header, dir)
+	if err != nil {
+		t.Fatalf("save second thumbnail: %v", err)
+	}
+
+	if firstName == secondName {
+		t.Fatalf("expected unique thumbnail filenames, got duplicate %q", firstName)
+	}
+	if !strings.HasSuffix(firstName, "_thumb.png") {
+		t.Fatalf("expected first thumbnail name to keep thumb suffix, got %q", firstName)
+	}
+	if !strings.HasSuffix(secondName, "_thumb.png") {
+		t.Fatalf("expected second thumbnail name to keep thumb suffix, got %q", secondName)
+	}
+	if _, err := os.Stat(filepath.Join(dir, firstName)); err != nil {
+		t.Fatalf("expected first thumbnail file to exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, secondName)); err != nil {
+		t.Fatalf("expected second thumbnail file to exist: %v", err)
+	}
+}
+
 func TestIsRulesTextExtension(t *testing.T) {
 	if !isRulesTextExtension("rule.md") {
 		t.Fatal("expected .md to be allowed")
@@ -180,4 +221,20 @@ func TestResolveReviewedUploadResourceType(t *testing.T) {
 			t.Fatalf("expected skill, got %q", got)
 		}
 	})
+}
+
+func newTempMultipartFile(t *testing.T, payload []byte) *os.File {
+	t.Helper()
+
+	f, err := os.CreateTemp(t.TempDir(), "thumb-*")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	if _, err := f.Write(payload); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		t.Fatalf("rewind temp file: %v", err)
+	}
+	return f
 }

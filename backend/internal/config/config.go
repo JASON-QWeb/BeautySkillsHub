@@ -34,8 +34,6 @@ type Config struct {
 func Load() *Config {
 	loadDotEnv(".env.local")
 	loadDotEnv("backend/.env.local")
-	loadDotEnv(".env")
-	loadDotEnv("backend/.env")
 
 	cfg := &Config{
 		AppEnv:        getEnv("APP_ENV", "local"),

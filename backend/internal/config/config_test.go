@@ -6,12 +6,15 @@ import (
 	"testing"
 )
 
-func TestLoad_UsesDotEnvValuesWhenProcessEnvIsUnset(t *testing.T) {
+func TestLoad_UsesDotEnvLocalValuesWhenProcessEnvIsUnset(t *testing.T) {
 	tmp := t.TempDir()
-	envPath := filepath.Join(tmp, ".env")
+	envPath := filepath.Join(tmp, ".env.local")
 	content := "APP_ENV=local\nPORT=9090\nOPENAI_API_KEY=test-key\nOPENAI_BASE_URL=http://localhost:11434/v1\nOPENAI_MODEL=gpt-4.1-mini\nDATABASE_URL=postgres://tester:secret@localhost:5432/skillhub?sslmode=disable\nUPLOAD_DIR=./tmp-uploads\nTHUMBNAIL_DIR=./tmp-thumbs\n"
 	if err := os.WriteFile(envPath, []byte(content), 0o600); err != nil {
-		t.Fatalf("write .env: %v", err)
+		t.Fatalf("write .env.local: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, ".env"), []byte("PORT=9999\nOPENAI_MODEL=ignored-model\n"), 0o600); err != nil {
+		t.Fatalf("write ignored .env: %v", err)
 	}
 
 	t.Setenv("APP_ENV", "")
@@ -42,31 +45,31 @@ func TestLoad_UsesDotEnvValuesWhenProcessEnvIsUnset(t *testing.T) {
 		t.Fatalf("expected port 9090, got %q", cfg.Port)
 	}
 	if cfg.OpenAIKey != "test-key" {
-		t.Fatalf("expected OpenAI key from .env, got %q", cfg.OpenAIKey)
+		t.Fatalf("expected OpenAI key from .env.local, got %q", cfg.OpenAIKey)
 	}
 	if cfg.OpenAIBaseURL != "http://localhost:11434/v1" {
-		t.Fatalf("expected base url from .env, got %q", cfg.OpenAIBaseURL)
+		t.Fatalf("expected base url from .env.local, got %q", cfg.OpenAIBaseURL)
 	}
 	if cfg.OpenAIModel != "gpt-4.1-mini" {
-		t.Fatalf("expected model from .env, got %q", cfg.OpenAIModel)
+		t.Fatalf("expected model from .env.local, got %q", cfg.OpenAIModel)
 	}
 	if cfg.DatabaseURL != "postgres://tester:secret@localhost:5432/skillhub?sslmode=disable" {
-		t.Fatalf("expected database url from .env, got %q", cfg.DatabaseURL)
+		t.Fatalf("expected database url from .env.local, got %q", cfg.DatabaseURL)
 	}
 	if cfg.UploadDir != "./tmp-uploads" {
-		t.Fatalf("expected upload dir from .env, got %q", cfg.UploadDir)
+		t.Fatalf("expected upload dir from .env.local, got %q", cfg.UploadDir)
 	}
 	if cfg.ThumbnailDir != "./tmp-thumbs" {
-		t.Fatalf("expected thumbnail dir from .env, got %q", cfg.ThumbnailDir)
+		t.Fatalf("expected thumbnail dir from .env.local, got %q", cfg.ThumbnailDir)
 	}
 }
 
-func TestLoad_ProcessEnvOverridesDotEnv(t *testing.T) {
+func TestLoad_ProcessEnvOverridesDotEnvLocal(t *testing.T) {
 	tmp := t.TempDir()
-	envPath := filepath.Join(tmp, ".env")
+	envPath := filepath.Join(tmp, ".env.local")
 	content := "OPENAI_MODEL=file-model\nOPENAI_API_KEY=file-key\n"
 	if err := os.WriteFile(envPath, []byte(content), 0o600); err != nil {
-		t.Fatalf("write .env: %v", err)
+		t.Fatalf("write .env.local: %v", err)
 	}
 
 	t.Setenv("OPENAI_MODEL", "env-model")
@@ -169,7 +172,60 @@ func TestLoad_GitHubDefaults(t *testing.T) {
 	}
 }
 
-func TestLoad_PrefersBackendDotEnvLocalOverBackendDotEnv(t *testing.T) {
+func TestLoad_IgnoresDotEnvFilesWithoutLocalSuffix(t *testing.T) {
+	tmp := t.TempDir()
+	backendDir := filepath.Join(tmp, "backend")
+	if err := os.MkdirAll(backendDir, 0o755); err != nil {
+		t.Fatalf("mkdir backend: %v", err)
+	}
+
+	if err := os.WriteFile(
+		filepath.Join(tmp, ".env"),
+		[]byte("OPENAI_MODEL=file-model\nDATABASE_URL=postgres://ignored-root-dot-env\n"),
+		0o600,
+	); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(backendDir, ".env"),
+		[]byte("APP_ENV=stg\nPORT=9999\n"),
+		0o600,
+	); err != nil {
+		t.Fatalf("write backend/.env: %v", err)
+	}
+
+	t.Setenv("APP_ENV", "")
+	t.Setenv("PORT", "")
+	t.Setenv("OPENAI_MODEL", "")
+	t.Setenv("DATABASE_URL", "")
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get wd: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(wd)
+	})
+	if err := os.Chdir(tmp); err != nil {
+		t.Fatalf("chdir temp dir: %v", err)
+	}
+
+	cfg := Load()
+	if cfg.AppEnv != "local" {
+		t.Fatalf("expected default app env when only .env files exist, got %q", cfg.AppEnv)
+	}
+	if cfg.Port != "8080" {
+		t.Fatalf("expected default port when only .env files exist, got %q", cfg.Port)
+	}
+	if cfg.OpenAIModel != "gpt-4o-mini" {
+		t.Fatalf("expected default model when only .env files exist, got %q", cfg.OpenAIModel)
+	}
+	if cfg.DatabaseURL != "postgres://skillhub:skillhub@localhost:5432/skillhub_local?sslmode=disable" {
+		t.Fatalf("expected default database url when only .env files exist, got %q", cfg.DatabaseURL)
+	}
+}
+
+func TestLoad_UsesBackendDotEnvLocalAndIgnoresBackendDotEnv(t *testing.T) {
 	tmp := t.TempDir()
 	backendDir := filepath.Join(tmp, "backend")
 	if err := os.MkdirAll(backendDir, 0o755); err != nil {
@@ -213,7 +269,7 @@ func TestLoad_PrefersBackendDotEnvLocalOverBackendDotEnv(t *testing.T) {
 	if cfg.AppEnv != "stg" {
 		t.Fatalf("expected backend/.env.local to set app env, got %q", cfg.AppEnv)
 	}
-	if cfg.OpenAIModel != "file-model" {
-		t.Fatalf("expected backend/.env fallback to remain available, got %q", cfg.OpenAIModel)
+	if cfg.OpenAIModel != "gpt-4o-mini" {
+		t.Fatalf("expected backend/.env to be ignored, got %q", cfg.OpenAIModel)
 	}
 }

@@ -21,6 +21,14 @@ const maxUploadSize = 50 << 20 // 50 MB
 
 const maxThumbnailSize = 5 << 20 // 5 MB
 
+const MultipartFormMemoryLimit = 8 << 20
+
+const multipartFormOverheadSize = 2 << 20
+
+const MaxUploadRequestBodySize = maxUploadSize + maxThumbnailSize + multipartFormOverheadSize
+
+const MaxContentAssetRequestBodySize = maxContentImageSize + multipartFormOverheadSize
+
 var (
 	allowedThumbnailExtensions = map[string]struct{}{
 		".png":  {},
@@ -476,7 +484,12 @@ func saveUploadedThumbnail(name string, file multipart.File, header *multipart.F
 		base = "thumbnail"
 	}
 
-	thumbFileName := base + "_thumb" + ext
+	suffix, err := randomHex(4)
+	if err != nil {
+		return "", err
+	}
+
+	thumbFileName := fmt.Sprintf("%s-%s_thumb%s", base, suffix, ext)
 	thumbPath := filepath.Join(thumbnailDir, thumbFileName)
 
 	if err := os.MkdirAll(thumbnailDir, 0755); err != nil {

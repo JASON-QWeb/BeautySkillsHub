@@ -26,10 +26,14 @@ frontend/dist/
 frontend/dist-ssr/
 frontend/*.local
 frontend/.eslintcache
+frontend/*.tsbuildinfo
+frontend/tsconfig.tsbuildinfo
 
 # Go / Backend
 backend/bin/
 backend/obj/
+backend/server
+backend/*.bin
 backend/*.exe
 backend/*.exe~
 backend/*.dll
@@ -42,7 +46,10 @@ backend/main
 # Database and Uploads (Local Data)
 backend/skill_hub.db
 backend/skill_hub.db-journal
+backend/*.db
+backend/*.db-*
 backend/uploads/
+backend/avatars/
 backend/thumbnails/
 
 # Editor / IDE

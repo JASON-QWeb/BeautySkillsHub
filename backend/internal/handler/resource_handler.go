@@ -897,6 +897,7 @@ func RegisterResourceRoutes(
 	h *ResourceHandler,
 	authMiddleware gin.HandlerFunc,
 	optionalAuthMiddleware gin.HandlerFunc,
+	uploadMiddleware gin.HandlerFunc,
 	routePrefix string,
 ) {
 	publicReads := api.Group(routePrefix)
@@ -912,8 +913,8 @@ func RegisterResourceRoutes(
 
 	protected := api.Group(routePrefix)
 	protected.Use(authMiddleware)
-	protected.POST("", h.Upload)
-	protected.PUT("/:id", h.Update)
+	protected.POST("", uploadMiddleware, h.Upload)
+	protected.PUT("/:id", uploadMiddleware, h.Update)
 	protected.DELETE("/:id", h.Delete)
 	protected.POST("/:id/like", h.Like)
 	protected.DELETE("/:id/like", h.Unlike)
