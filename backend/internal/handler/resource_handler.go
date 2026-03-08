@@ -10,12 +10,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"skill-hub/internal/config"
 	"skill-hub/internal/model"
 	"skill-hub/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // ResourceHandler handles CRUD and engagement for non-skill resource types
@@ -132,6 +134,35 @@ func (h *ResourceHandler) Get(c *gin.Context) {
 			skill.Favorited = fav
 		}
 	}
+	c.JSON(http.StatusOK, skill)
+}
+
+func (h *ResourceHandler) GetReviewTarget(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid ID"})
+		return
+	}
+
+	skill, err := h.skillSvc.GetSkill(uint(id))
+	if err != nil || skill.ResourceType != h.resourceType {
+		c.JSON(http.StatusNotFound, gin.H{"error": "resource not found"})
+		return
+	}
+
+	revision, err := h.skillSvc.GetActiveRevision(skill.ID)
+	if err == nil {
+		view := service.BuildSkillReviewView(skill, revision)
+		view.ThumbnailURL = normalizeThumbnailURL(view.ThumbnailURL)
+		c.JSON(http.StatusOK, view)
+		return
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "load review target failed"})
+		return
+	}
+
+	skill.ThumbnailURL = normalizeThumbnailURL(skill.ThumbnailURL)
 	c.JSON(http.StatusOK, skill)
 }
 
@@ -507,6 +538,90 @@ func (h *ResourceHandler) Update(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"skill": skill})
 }
 
+func (h *ResourceHandler) HumanReview(c *gin.Context) {
+	userID, username, ok := currentUserIdentity(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "未登录或登录状态无效"})
+		return
+	}
+
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 ID"})
+		return
+	}
+
+	skill, err := h.skillSvc.GetSkill(uint(id))
+	if err != nil || skill.ResourceType != h.resourceType {
+		c.JSON(http.StatusNotFound, gin.H{"error": "资源不存在"})
+		return
+	}
+
+	revision, err := h.skillSvc.GetActiveRevision(skill.ID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusConflict, gin.H{"error": "当前没有待复核的更新"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "加载待复核更新失败"})
+		return
+	}
+
+	if canManageSkill(skill, userID, username) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "不能复核自己上传的资源"})
+		return
+	}
+	if !revision.AIApproved {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "AI 审核未通过，无法人工复核"})
+		return
+	}
+	if revision.HumanReviewStatus == model.HumanReviewStatusApproved {
+		c.JSON(http.StatusConflict, gin.H{"error": "该更新已完成人工复核"})
+		return
+	}
+
+	req := humanReviewRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil && err != io.EOF {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效"})
+		return
+	}
+
+	approved := true
+	if req.Approved != nil {
+		approved = *req.Approved
+	}
+
+	now := time.Now()
+	reviewerID := userID
+	revision.HumanReviewerID = &reviewerID
+	revision.HumanReviewer = strings.TrimSpace(username)
+	revision.HumanReviewFeedback = strings.TrimSpace(req.Feedback)
+	revision.HumanReviewedAt = &now
+	if approved {
+		revision.HumanReviewStatus = model.HumanReviewStatusApproved
+	} else {
+		revision.HumanReviewStatus = model.HumanReviewStatusRejected
+		revision.Status = model.SkillRevisionStatusRejected
+		if err := h.skillSvc.UpdateSkillRevision(revision); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存复核结果失败"})
+			return
+		}
+		view := service.BuildSkillReviewView(skill, revision)
+		view.ThumbnailURL = normalizeThumbnailURL(view.ThumbnailURL)
+		c.JSON(http.StatusOK, gin.H{"skill": view})
+		return
+	}
+
+	updated, err := h.skillSvc.ApplyApprovedRevision(revision.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "应用更新失败"})
+		return
+	}
+
+	updated.ThumbnailURL = normalizeThumbnailURL(updated.ThumbnailURL)
+	c.JSON(http.StatusOK, gin.H{"skill": updated})
+}
+
 func (h *ResourceHandler) updateFromMultipart(c *gin.Context, skill *model.Skill) {
 	nameRaw, hasName := c.GetPostForm("name")
 	descriptionRaw, hasDescription := c.GetPostForm("description")
@@ -690,6 +805,47 @@ func (h *ResourceHandler) updateFromMultipart(c *gin.Context, skill *model.Skill
 
 	skill.ThumbnailURL = normalizeThumbnailURL(skill.ThumbnailURL)
 	c.JSON(http.StatusOK, gin.H{"skill": skill})
+}
+
+func preparePendingRevisionForResourceUpdate(revision *model.SkillRevision, resourceType string) {
+	revision.Status = model.SkillRevisionStatusPending
+	revision.HumanReviewStatus = model.HumanReviewStatusPending
+	revision.HumanReviewerID = nil
+	revision.HumanReviewer = ""
+	revision.HumanReviewFeedback = ""
+	revision.HumanReviewedAt = nil
+	revision.GitHubSyncError = ""
+
+	if resourceType == "skill" || resourceType == "rules" {
+		revision.AIApproved = false
+		revision.AIReviewStatus = model.AIReviewStatusQueued
+		revision.AIReviewPhase = model.AIReviewPhaseQueued
+		revision.AIReviewAttempts = 0
+		if revision.AIReviewMaxAttempts <= 0 {
+			revision.AIReviewMaxAttempts = 3
+		}
+		revision.AIReviewStartedAt = nil
+		revision.AIReviewCompletedAt = nil
+		revision.AIReviewDetails = ""
+		revision.AIFeedback = "更新内容已提交，等待 AI 审核"
+		revision.AIDescription = ""
+		revision.GitHubSyncStatus = service.GitHubSyncStatusPending
+		return
+	}
+
+	revision.AIApproved = true
+	revision.AIReviewStatus = model.AIReviewStatusPassed
+	revision.AIReviewPhase = model.AIReviewPhaseDone
+	revision.AIReviewAttempts = 0
+	if revision.AIReviewMaxAttempts <= 0 {
+		revision.AIReviewMaxAttempts = 3
+	}
+	revision.AIReviewStartedAt = nil
+	revision.AIReviewCompletedAt = nil
+	revision.AIReviewDetails = ""
+	revision.AIFeedback = "更新内容已提交，等待人工复核"
+	revision.AIDescription = ""
+	revision.GitHubSyncStatus = service.GitHubSyncStatusDisabled
 }
 
 func removeResourceUploadAsset(uploadDir, filePath string) {

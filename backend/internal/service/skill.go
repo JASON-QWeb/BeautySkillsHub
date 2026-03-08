@@ -69,6 +69,9 @@ func (s *SkillService) GetSkill(id uint) (*model.Skill, error) {
 	if err := s.db.First(&skill, id).Error; err != nil {
 		return nil, err
 	}
+	if err := s.attachPendingRevisionSummary(&skill); err != nil {
+		return nil, err
+	}
 	return &skill, nil
 }
 

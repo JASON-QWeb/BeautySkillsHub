@@ -65,12 +65,28 @@
   min-width: 0;
 }
 
+.detail-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
 .detail-title {
   font-size: clamp(2.2rem, 5vw, 3.2rem);
-  margin-bottom: 12px;
+  margin-bottom: 0;
   letter-spacing: -0.03em;
   color: var(--text-primary);
   font-weight: 800;
+  min-width: 0;
+}
+
+.detail-title-action {
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-size: 0.85rem;
+  padding: 6px 16px;
 }
 
 .detail-tags {

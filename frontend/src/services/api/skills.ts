@@ -93,6 +93,15 @@ export async function fetchSkill(id: number, resourceType = ''): Promise<Skill> 
     return res.json()
 }
 
+export async function fetchReviewTarget(id: number, resourceType = ''): Promise<Skill> {
+    const basePath = resourceType ? getResourcePath(resourceType) : '/skills'
+    const res = await fetch(`${API_BASE}${basePath}/${id}/review-target`, {
+        headers: getAuthHeaders(),
+    })
+    if (!res.ok) throw new Error('Failed to fetch review target')
+    return res.json()
+}
+
 export async function fetchSkillReadme(id: number, resourceType = ''): Promise<string> {
     const basePath = resourceType ? getResourcePath(resourceType) : '/skills'
     const res = await fetch(`${API_BASE}${basePath}/${id}/readme`, {
@@ -384,7 +393,7 @@ export async function updateSkill(id: number, payload: SkillUpdatePayload, resou
     return data.skill ?? data
 }
 
-export async function updateResourceFromUpload(id: number, formData: FormData, resourceType: 'mcp' | 'tools'): Promise<Skill> {
+export async function updateResourceFromUpload(id: number, formData: FormData, resourceType: 'skill' | 'rules' | 'mcp' | 'tools'): Promise<Skill> {
     const rawTags = formData.get('tags')
     if (typeof rawTags === 'string') {
         formData.set('tags', normalizeTagsForUpload(rawTags))

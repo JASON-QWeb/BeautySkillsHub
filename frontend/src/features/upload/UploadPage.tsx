@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useI18n } from '../../i18n/I18nProvider'
-import { RESOURCE_TYPES, Skill, SkillReviewStatusResponse, fetchSkillReviewStatus, retrySkillReview, uploadSkill, getDownloadUrl } from '../../services/api'
+import { RESOURCE_TYPES, Skill, SkillReviewStatusResponse, fetchSkill, fetchSkillReviewStatus, retrySkillReview, updateResourceFromUpload, uploadSkill, getDownloadUrl } from '../../services/api'
 import { useDialog } from '../../contexts/DialogContext'
 import FlowStepIcon from '../../components/FlowStepIcon'
 
@@ -209,11 +209,14 @@ function drawCropPreview(canvas: HTMLCanvasElement, image: HTMLImageElement, cro
 function UploadPage() {
     const navigate = useNavigate()
     const location = useLocation()
+    const [searchParams] = useSearchParams()
     const { t } = useI18n()
     const { user } = useAuth()
     const { showAlert } = useDialog()
 
     const resourceType = 'skill'
+    const editId = Number(searchParams.get('edit') || 0)
+    const isEditMode = Number.isInteger(editId) && editId > 0
     const reviewedUploadTypes: Array<'skill' | 'rules'> = ['skill', 'rules']
     const [name, setName] = useState('')
     const [description, setDescription] = useState('')
@@ -231,6 +234,7 @@ function UploadPage() {
 
     const [step, setStep] = useState(1)
     const [uploading, setUploading] = useState(false)
+    const [prefillLoading, setPrefillLoading] = useState(false)
     const [reviewStatus, setReviewStatus] = useState<ReviewStatus>('idle')
     const [feedback, setFeedback] = useState('')
     const [reviewMeta, setReviewMeta] = useState<SkillReviewStatusResponse | null>(null)
@@ -250,6 +254,69 @@ function UploadPage() {
     )
 
     useEffect(() => {
+        if (!isEditMode) {
+            setPrefillLoading(false)
+            return
+        }
+
+        if (!user) {
+            void showAlert('请先登录后再编辑 Skill 资源')
+            navigate('/resource/skill', { replace: true })
+            return
+        }
+
+        let cancelled = false
+        setPrefillLoading(true)
+
+        void fetchSkill(editId, resourceType)
+            .then(async skill => {
+                if (cancelled) return
+
+                const canEdit = (skill.user_id ? skill.user_id === user.id : false)
+                    || (skill.author || '').trim().toLowerCase() === user.username.trim().toLowerCase()
+                if (!canEdit) {
+                    await showAlert('仅上传者本人可以编辑该 Skill')
+                    if (!cancelled) {
+                        navigate(`/resource/skill/${editId}`, { replace: true })
+                    }
+                    return
+                }
+
+                if (skill.has_pending_revision) {
+                    await showAlert('当前已有更新在审核中，请等待本次 Review 完成')
+                    if (!cancelled) {
+                        navigate(`/resource/skill/${editId}`, { replace: true })
+                    }
+                    return
+                }
+
+                setName(skill.name || '')
+                setDescription(skill.description || '')
+                setTagItems(normalizePrefillTags(skill.tags || ''))
+                setTagInput('')
+                setPrefillThumbnailUrl(skill.thumbnail_url || '')
+                setFile(null)
+                setFolderFiles([])
+            })
+            .catch(async err => {
+                if (cancelled) return
+                await showAlert(err instanceof Error ? err.message : '加载待编辑资源失败')
+                if (!cancelled) {
+                    navigate('/resource/skill', { replace: true })
+                }
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setPrefillLoading(false)
+                }
+            })
+
+        return () => {
+            cancelled = true
+        }
+    }, [editId, isEditMode, navigate, resourceType, showAlert, user])
+
+    useEffect(() => {
         if (!thumbnail) {
             setThumbnailPreviewUrl('')
             return
@@ -261,7 +328,7 @@ function UploadPage() {
     }, [thumbnail])
 
     useEffect(() => {
-        if (!prefill || prefillAppliedRef.current) return
+        if (isEditMode || !prefill || prefillAppliedRef.current) return
         prefillAppliedRef.current = true
 
         if (prefill.name?.trim()) {
@@ -320,7 +387,7 @@ function UploadPage() {
         return t('upload.filesSelected', { count: folderFiles.length })
     }, [uploadMode, file, folderFiles, t])
 
-    const hasPayload = uploadMode === 'file' ? !!file : folderFiles.length > 0
+    const hasPayload = isEditMode || (uploadMode === 'file' ? !!file : folderFiles.length > 0)
 
     const compactTitle = useMemo(() => {
         if (uploadedSkill?.name) return uploadedSkill.name
@@ -574,7 +641,7 @@ function UploadPage() {
         formData.append('author', user?.username || 'Anonymous')
         formData.append('upload_mode', uploadMode)
         formData.append('tags', tagItems.join(','))
-        if (prefill?.source_skill_id) {
+        if (!isEditMode && prefill?.source_skill_id) {
             formData.append('source_skill_id', String(prefill.source_skill_id))
         }
 
@@ -602,13 +669,18 @@ function UploadPage() {
         setFeedback('')
 
         try {
-            const result = await uploadSkill(formData)
-            setUploadedSkill(result.skill)
-            setReviewStatus('pending')
-            setFeedback(result.feedback || '审核排队中，请稍候...')
-            setReviewMeta(null)
-            if (result.skill?.id) {
-                startReviewPolling(result.skill.id)
+            if (isEditMode) {
+                const updated = await updateResourceFromUpload(editId, formData, 'skill')
+                navigate(`/resource/skill/${updated.id}`, { replace: true })
+            } else {
+                const result = await uploadSkill(formData)
+                setUploadedSkill(result.skill)
+                setReviewStatus('pending')
+                setFeedback(result.feedback || '审核排队中，请稍候...')
+                setReviewMeta(null)
+                if (result.skill?.id) {
+                    startReviewPolling(result.skill.id)
+                }
             }
         } catch (err) {
             setReviewStatus('rejected')
@@ -679,9 +751,15 @@ function UploadPage() {
                     {step === 1 ? (
                         <form className="upload-form-card glass-card" onSubmit={handleSubmit}>
                             <header>
-                                <h1>上传 Skills</h1>
-                                <p>支持上传文件或文件夹内容。</p>
+                                <h1>{isEditMode ? '更新 Skill' : '上传 Skills'}</h1>
+                                <p>{isEditMode ? '可只修改元数据，也可重新上传文件或文件夹；提交后会进入新的 Review。' : '支持上传文件或文件夹内容。'}</p>
                             </header>
+
+                            {prefillLoading && (
+                                <div className="upload-placeholder-card" style={{ marginBottom: 16 }}>
+                                    <p>{t('common.loadingResources')}</p>
+                                </div>
+                            )}
 
                             <div className="upload-type-tabs">
                                 {reviewedUploadTypes.map((key) => (
@@ -831,8 +909,8 @@ function UploadPage() {
                                 )}
                             </div>
 
-                            <button className="upload-submit-btn" disabled={uploading || !name.trim() || !hasPayload}>
-                                {uploading ? t('upload.reviewing') : t('upload.submit')}
+                            <button className="upload-submit-btn" disabled={prefillLoading || uploading || !name.trim() || !hasPayload}>
+                                {uploading ? t('upload.reviewing') : (isEditMode ? '提交更新并进入 Review' : t('upload.submit'))}
                             </button>
                         </form>
                     ) : (

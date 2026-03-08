@@ -132,7 +132,10 @@ export function SkillsInstallModal({ isOpen, onClose }: SkillsInstallModalProps)
                     <section className="skills-install-step">
                         <h3>3. 更新与维护已安装的技能</h3>
                         <p className="skills-install-tip" style={{ marginTop: 0, marginBottom: 12 }}>
-                            技能安装后，你可以通过以下命令随时保持它们处于最新状态：
+                            技能安装后，你可以通过以下命令随时保持它们处于最新状态。
+                            <span style={{ color: 'var(--accent-secondary)', fontWeight: 500, display: 'block', marginTop: '4px' }}>
+                                ⚠️ 注意：check 和 update 目前仅支持全局安装的技能库，暂不支持针对项目内部局部安装的技能进行版本管理。
+                            </span>
                         </p>
                         
                         <div className="skills-install-command-row">
@@ -145,7 +148,7 @@ export function SkillsInstallModal({ isOpen, onClose }: SkillsInstallModalProps)
                             </button>
                         </div>
                         <p className="skills-install-tip" style={{ marginTop: 6, marginBottom: 16, fontSize: '0.85rem' }}>
-                            <strong>只读检查：</strong>扫描所有已安装技能，列出哪些有新版本可供更新，但不会改动任何文件。
+                            <strong>只读检查：</strong>扫描全局已安装技能，预览哪些有新版本可供更新，不会改动任何文件。
                         </p>
 
                         <div className="skills-install-command-row">
@@ -158,11 +161,32 @@ export function SkillsInstallModal({ isOpen, onClose }: SkillsInstallModalProps)
                             </button>
                         </div>
                         <p className="skills-install-tip" style={{ marginTop: 6, marginBottom: 0, fontSize: '0.85rem' }}>
-                            <strong>执行更新：</strong>将检测到有变化的技能拉取并替换为最新版本，并自动同步更新锁文件记录。
+                            <strong>执行更新：</strong>将全局技能拉取并替换为最新版本，并自动同步版本记录。
                         </p>
                         
                         <div style={{ marginTop: 16, padding: '10px 14px', background: 'var(--accent-glow)', borderRadius: '10px', fontSize: '0.88rem', color: 'var(--text-primary)', border: '1px solid var(--border)' }}>
                             💡 <strong>推荐流程：</strong>先执行 <code>check</code> 预览可更新项，确认无误后再执行 <code>update</code> 完成批量升级。
+                        </div>
+                    </section>
+
+                    <section className="skills-install-step" style={{ borderTop: '1px dashed var(--border)', paddingTop: '20px', marginTop: '20px' }}>
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                            <div>
+                                <h4 style={{ margin: '0 0 8px 0', fontSize: '0.95rem', color: 'var(--accent-primary)' }}>Cline 用户小贴士</h4>
+                                <p style={{ margin: 0, fontSize: '0.85rem', lineHeight: 1.5, opacity: 0.9 }}>
+                                    如果你想让这些技能在 <strong>Cline</strong> 中生效，需要将它们移动到 Cline 的专用技能目录下。请在终端执行以下指令：
+                                </p>
+                                <div className="skills-install-command-row" style={{ marginTop: '10px', background: 'rgba(0,0,0,0.2)' }}>
+                                    <code style={{ fontSize: '0.8rem' }}>mkdir -p .cline/skills && mv .agents/skills/* .cline/skills/</code>
+                                    <button
+                                        type="button"
+                                        style={{ padding: '2px 8px', fontSize: '0.75rem' }}
+                                        onClick={() => void copyCommand('mkdir -p .cline/skills && mv .agents/skills/* .cline/skills/', 'cline')}
+                                    >
+                                        {copiedKey === 'cline' ? '已复制' : '复制'}
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </section>
                 </div>

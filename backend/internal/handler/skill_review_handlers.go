@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -19,6 +20,7 @@ import (
 	"skill-hub/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 const (
@@ -114,6 +116,16 @@ func (h *SkillHandler) GetSkillReviewStatus(c *gin.Context) {
 		return
 	}
 
+	revision, err := h.skillSvc.GetActiveRevision(skill.ID)
+	if err == nil {
+		c.JSON(http.StatusOK, buildRevisionReviewStatusResponse(revision))
+		return
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "加载审核状态失败"})
+		return
+	}
+
 	c.JSON(http.StatusOK, buildReviewStatusResponse(skill))
 }
 
@@ -139,6 +151,54 @@ func (h *SkillHandler) RetrySkillReview(c *gin.Context) {
 
 	if !canManageSkill(skill, userID, username) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "只能重试自己上传资源的审核"})
+		return
+	}
+
+	revision, err := h.skillSvc.GetActiveRevision(skill.ID)
+	if err == nil {
+		if revision.AIReviewStatus == model.AIReviewStatusRunning || revision.AIReviewStatus == model.AIReviewStatusQueued {
+			c.JSON(http.StatusConflict, gin.H{"error": "审核正在进行中，请稍候"})
+			return
+		}
+		if revision.AIReviewStatus == model.AIReviewStatusPassed {
+			c.JSON(http.StatusConflict, gin.H{"error": "该资源已通过审核，无需重试"})
+			return
+		}
+
+		maxAttempts := revision.AIReviewMaxAttempts
+		if maxAttempts <= 0 {
+			maxAttempts = 3
+			revision.AIReviewMaxAttempts = 3
+		}
+		if revision.AIReviewAttempts >= maxAttempts {
+			revision.AIReviewStatus = model.AIReviewStatusFailedTerminal
+			if updateErr := h.skillSvc.UpdateSkillRevision(revision); updateErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "更新审核状态失败"})
+				return
+			}
+			c.JSON(http.StatusConflict, gin.H{"error": "已达最大重试次数，请重新提交更新", "status": buildRevisionReviewStatusResponse(revision)})
+			return
+		}
+
+		revision.AIReviewStatus = model.AIReviewStatusQueued
+		revision.AIReviewPhase = model.AIReviewPhaseQueued
+		revision.AIReviewDetails = ""
+		revision.AIFeedback = "重新排队中，请稍候..."
+		if updateErr := h.skillSvc.UpdateSkillRevision(revision); updateErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "更新审核状态失败"})
+			return
+		}
+
+		h.dispatchAIReviewRevision(revision.ID)
+
+		c.JSON(http.StatusOK, gin.H{
+			"message": "已重新触发审核",
+			"status":  buildRevisionReviewStatusResponse(revision),
+		})
+		return
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "加载审核状态失败"})
 		return
 	}
 
@@ -184,28 +244,15 @@ func (h *SkillHandler) RetrySkillReview(c *gin.Context) {
 }
 
 func buildReviewStatusResponse(skill *model.Skill) skillReviewStatusResponse {
-	maxAttempts := skill.AIReviewMaxAttempts
-	if maxAttempts <= 0 {
-		maxAttempts = 3
-	}
-	retryRemaining := maxAttempts - skill.AIReviewAttempts
-	if retryRemaining < 0 {
-		retryRemaining = 0
-	}
-	canRetry := (skill.AIReviewStatus == model.AIReviewStatusFailedRetry || skill.AIReviewStatus == model.AIReviewStatusFailedTerminal) &&
-		skill.AIReviewAttempts < maxAttempts
-
-	return skillReviewStatusResponse{
-		Status:         skill.AIReviewStatus,
-		Phase:          skill.AIReviewPhase,
-		Attempts:       skill.AIReviewAttempts,
-		MaxAttempts:    maxAttempts,
-		RetryRemaining: retryRemaining,
-		CanRetry:       canRetry,
-		Approved:       skill.AIApproved,
-		Feedback:       skill.AIFeedback,
-		Progress:       decodeReviewProgress(skill.AIReviewDetails),
-	}
+	return buildReviewStatusResponseValues(
+		skill.AIReviewStatus,
+		skill.AIReviewPhase,
+		skill.AIReviewAttempts,
+		skill.AIReviewMaxAttempts,
+		skill.AIApproved,
+		skill.AIFeedback,
+		skill.AIReviewDetails,
+	)
 }
 
 func (h *SkillHandler) dispatchAIReview(skillID uint) {
@@ -213,21 +260,23 @@ func (h *SkillHandler) dispatchAIReview(skillID uint) {
 		return
 	}
 
+	key := reviewQueueKey("skill", skillID)
 	h.reviewMu.Lock()
-	if _, exists := h.reviewRunning[skillID]; exists {
+	if _, exists := h.reviewRunning[key]; exists {
 		h.reviewMu.Unlock()
 		return
 	}
-	h.reviewRunning[skillID] = struct{}{}
+	h.reviewRunning[key] = struct{}{}
 	h.reviewMu.Unlock()
 
 	go h.runAIReview(skillID)
 }
 
 func (h *SkillHandler) runAIReview(skillID uint) {
+	key := reviewQueueKey("skill", skillID)
 	defer func() {
 		h.reviewMu.Lock()
-		delete(h.reviewRunning, skillID)
+		delete(h.reviewRunning, key)
 		h.reviewMu.Unlock()
 	}()
 
@@ -551,80 +600,7 @@ func (h *SkillHandler) collectReviewTargets(skill *model.Skill) ([]reviewTarget,
 	if skill == nil || strings.TrimSpace(skill.FilePath) == "" {
 		return nil, fmt.Errorf("empty file path")
 	}
-
-	root := skill.FilePath
-	sessionRoot := uploadSessionRoot(h.cfg.UploadDir, skill.FilePath)
-	if sessionRoot != "" {
-		if info, err := os.Stat(sessionRoot); err == nil && info.IsDir() {
-			root = sessionRoot
-		}
-	}
-
-	info, err := os.Stat(root)
-	if err != nil {
-		return nil, err
-	}
-
-	targets := make([]reviewTarget, 0, 16)
-	if info.IsDir() {
-		walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if d.IsDir() {
-				return nil
-			}
-
-			rel, err := filepath.Rel(root, path)
-			if err != nil {
-				return err
-			}
-			rel = filepath.ToSlash(rel)
-			mode := fs.FileMode(0)
-			if fileInfo, err := d.Info(); err == nil {
-				mode = fileInfo.Mode()
-			}
-			if kind, ok := classifyReviewTarget(rel, path, mode); ok {
-				targets = append(targets, reviewTarget{
-					Path:      rel,
-					Kind:      kind,
-					LocalPath: path,
-				})
-			}
-			return nil
-		})
-		if walkErr != nil {
-			return nil, walkErr
-		}
-	} else {
-		rel := sanitizeLocalFilename(filepath.Base(root))
-		if kind, ok := classifyReviewTarget(rel, root, info.Mode()); ok {
-			targets = append(targets, reviewTarget{Path: rel, Kind: kind, LocalPath: root})
-		}
-	}
-
-	if len(targets) == 0 {
-		fallbackInfo, err := os.Stat(skill.FilePath)
-		if err != nil {
-			return nil, err
-		}
-		fallbackPath := sanitizeLocalFilename(filepath.Base(skill.FilePath))
-		kind := "primary-file"
-		if classified, ok := classifyReviewTarget(fallbackPath, skill.FilePath, fallbackInfo.Mode()); ok {
-			kind = classified
-		}
-		targets = append(targets, reviewTarget{
-			Path:      fallbackPath,
-			Kind:      kind,
-			LocalPath: skill.FilePath,
-		})
-	}
-
-	targets = dedupeReviewTargets(targets)
-	sort.Slice(targets, func(i, j int) bool {
-		return targets[i].Path < targets[j].Path
-	})
-	return targets, nil
+	return h.collectReviewTargetsForFile(skill.FilePath)
 }
 
 func dedupeReviewTargets(items []reviewTarget) []reviewTarget {
@@ -754,59 +730,7 @@ func (h *SkillHandler) collectSyncEntriesFromLocal(skill *model.Skill) ([]servic
 	if skill == nil {
 		return nil, fmt.Errorf("skill is nil")
 	}
-	if strings.TrimSpace(skill.FilePath) == "" {
-		return nil, fmt.Errorf("empty file path")
-	}
-
-	var entries []service.SyncFileEntry
-	sessionRoot := uploadSessionRoot(h.cfg.UploadDir, skill.FilePath)
-	if sessionRoot != "" {
-		if info, err := os.Stat(sessionRoot); err != nil || !info.IsDir() {
-			sessionRoot = ""
-		}
-	}
-	if sessionRoot != "" {
-		walkErr := filepath.WalkDir(sessionRoot, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() {
-				return nil
-			}
-			rel, err := filepath.Rel(sessionRoot, path)
-			if err != nil {
-				return err
-			}
-			rel = filepath.ToSlash(rel)
-			normalizedRel, err := service.NormalizeRepoRelativePath(rel)
-			if err != nil {
-				return err
-			}
-			entries = append(entries, service.SyncFileEntry{
-				LocalPath:    path,
-				RelativePath: normalizedRel,
-			})
-			return nil
-		})
-		if walkErr != nil {
-			return nil, walkErr
-		}
-	}
-
-	if len(entries) == 0 {
-		if _, err := os.Stat(skill.FilePath); err != nil {
-			return nil, err
-		}
-		entries = append(entries, service.SyncFileEntry{
-			LocalPath:    skill.FilePath,
-			RelativePath: sanitizeLocalFilename(filepath.Base(skill.FilePath)),
-		})
-	}
-
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].RelativePath < entries[j].RelativePath
-	})
-	return entries, nil
+	return h.collectSyncEntriesForFile(skill.FilePath)
 }
 
 func collectReviewTargetsFromSession(sessionRoot string) ([]reviewTarget, error) {

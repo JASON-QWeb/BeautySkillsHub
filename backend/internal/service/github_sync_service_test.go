@@ -252,7 +252,7 @@ func TestGitHubSyncService_SyncUploadedFolderReplacesStaleFiles(t *testing.T) {
 	result := svc.SyncUploadedFolder(context.Background(), "My Skill", "skill", []SyncFileEntry{
 		{LocalPath: localA, RelativePath: "a.txt"},
 		{LocalPath: localD, RelativePath: "d.txt"},
-	})
+	}, true)
 	if result.Status != GitHubSyncStatusSuccess {
 		t.Fatalf("expected success status, got %q (error=%q)", result.Status, result.Error)
 	}

@@ -454,7 +454,8 @@ func uploadSessionRoot(base, filePath string) string {
 }
 
 func isUploadSessionDirName(segment string) bool {
-	return strings.Contains(strings.ToLower(strings.TrimSpace(segment)), "upload-")
+	lower := strings.ToLower(strings.TrimSpace(segment))
+	return strings.HasPrefix(lower, "skill-upload-") || strings.HasPrefix(lower, "skill-update-")
 }
 
 func validateThumbnailHeader(header *multipart.FileHeader) (string, error) {

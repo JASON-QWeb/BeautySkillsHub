@@ -235,11 +235,14 @@ type SyncFileEntry struct {
 }
 
 // SyncUploadedFolder syncs multiple files from a folder upload to GitHub.
+// When deleteStale is true, files on GitHub not present in the upload are deleted.
+// For partial updates (e.g. revision updates), pass false to keep existing files.
 func (s *GitHubSyncService) SyncUploadedFolder(
 	ctx context.Context,
 	skillName,
 	resourceType string,
 	files []SyncFileEntry,
+	deleteStale bool,
 ) GitHubSyncResult {
 	if s.cfg == nil || !s.cfg.GitHubSyncEnabled {
 		return GitHubSyncResult{Status: GitHubSyncStatusDisabled}
@@ -327,13 +330,15 @@ func (s *GitHubSyncService) SyncUploadedFolder(
 		}
 	}
 
-	stalePaths := collectStalePaths(existingPaths, desiredPaths)
-	if len(stalePaths) > 0 {
-		if err := s.DeleteSkillFilesFromGitHub(ctx, stalePaths); err != nil {
-			return GitHubSyncResult{
-				Status: GitHubSyncStatusFailed,
-				Path:   dirPath,
-				Error:  fmt.Sprintf("清理 GitHub 旧文件失败: %v", err),
+	if deleteStale {
+		stalePaths := collectStalePaths(existingPaths, desiredPaths)
+		if len(stalePaths) > 0 {
+			if err := s.DeleteSkillFilesFromGitHub(ctx, stalePaths); err != nil {
+				return GitHubSyncResult{
+					Status: GitHubSyncStatusFailed,
+					Path:   dirPath,
+					Error:  fmt.Sprintf("清理 GitHub 旧文件失败: %v", err),
+				}
 			}
 		}
 	}

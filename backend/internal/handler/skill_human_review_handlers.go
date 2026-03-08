@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"skill-hub/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type humanReviewRequest struct {
@@ -36,6 +38,16 @@ func (h *SkillHandler) HumanReviewSkill(c *gin.Context) {
 	skill, err := h.getSkillResource(uint(id))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "资源不存在"})
+		return
+	}
+
+	revision, err := h.skillSvc.GetActiveRevision(skill.ID)
+	if err == nil {
+		h.humanReviewPendingRevision(c, skill, revision, userID, username)
+		return
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "加载待复核更新失败"})
 		return
 	}
 
@@ -139,7 +151,7 @@ func (h *SkillHandler) HumanReviewSkill(c *gin.Context) {
 		return
 	}
 
-	syncResult := h.githubSyncSvc.SyncUploadedFolder(c.Request.Context(), skill.Name, skill.ResourceType, entries)
+	syncResult := h.githubSyncSvc.SyncUploadedFolder(c.Request.Context(), skill.Name, skill.ResourceType, entries, true)
 	if syncResult.Status != service.GitHubSyncStatusSuccess {
 		skill.GitHubSyncStatus = service.GitHubSyncStatusFailed
 		skill.GitHubSyncError = strings.TrimSpace(syncResult.Error)
@@ -172,4 +184,118 @@ func (h *SkillHandler) HumanReviewSkill(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"skill": skill,
 	})
+}
+
+func (h *SkillHandler) humanReviewPendingRevision(
+	c *gin.Context,
+	skill *model.Skill,
+	revision *model.SkillRevision,
+	userID uint,
+	username string,
+) {
+	if !revision.AIApproved {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "AI 审核未通过，无法人工复核"})
+		return
+	}
+	if revision.HumanReviewStatus == model.HumanReviewStatusApproved {
+		c.JSON(http.StatusConflict, gin.H{"error": "该更新已完成人工复核"})
+		return
+	}
+	if canManageSkill(skill, userID, username) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "不能复核自己上传的资源"})
+		return
+	}
+
+	req := humanReviewRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil && err != io.EOF {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效"})
+		return
+	}
+
+	approved := true
+	if req.Approved != nil {
+		approved = *req.Approved
+	}
+
+	now := time.Now()
+	reviewerID := userID
+	revision.HumanReviewerID = &reviewerID
+	revision.HumanReviewer = strings.TrimSpace(username)
+	revision.HumanReviewFeedback = strings.TrimSpace(req.Feedback)
+	revision.HumanReviewedAt = &now
+	if approved {
+		revision.HumanReviewStatus = model.HumanReviewStatusApproved
+	} else {
+		revision.HumanReviewStatus = model.HumanReviewStatusRejected
+		revision.Status = model.SkillRevisionStatusRejected
+		if err := h.skillSvc.UpdateSkillRevision(revision); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存复核结果失败"})
+			return
+		}
+		view := service.BuildSkillReviewView(skill, revision)
+		view.ThumbnailURL = normalizeThumbnailURL(view.ThumbnailURL)
+		c.JSON(http.StatusOK, gin.H{"skill": view})
+		return
+	}
+
+	if skill.ResourceType == "skill" && h.cfg.GitHubSyncEnabled && h.githubSyncSvc != nil {
+		revision.GitHubSyncStatus = service.GitHubSyncStatusPending
+		revision.GitHubSyncError = ""
+		if err := h.skillSvc.UpdateSkillRevision(revision); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存复核结果失败"})
+			return
+		}
+
+		entries, err := h.collectSyncEntriesForFile(revision.FilePath)
+		if err != nil {
+			revision.GitHubSyncStatus = service.GitHubSyncStatusFailed
+			revision.GitHubSyncError = "收集待同步文件失败: " + err.Error()
+			_ = h.skillSvc.UpdateSkillRevision(revision)
+			c.JSON(http.StatusBadGateway, gin.H{"error": revision.GitHubSyncError})
+			return
+		}
+
+		syncResult := h.githubSyncSvc.SyncUploadedFolder(c.Request.Context(), revision.Name, revision.ResourceType, entries, false)
+		if syncResult.Status != service.GitHubSyncStatusSuccess {
+			revision.GitHubSyncStatus = service.GitHubSyncStatusFailed
+			revision.GitHubSyncError = strings.TrimSpace(syncResult.Error)
+			if revision.GitHubSyncError == "" {
+				revision.GitHubSyncError = "GitHub 同步失败"
+			}
+			_ = h.skillSvc.UpdateSkillRevision(revision)
+			c.JSON(http.StatusBadGateway, gin.H{"error": revision.GitHubSyncError})
+			return
+		}
+
+		revision.GitHubSyncStatus = syncResult.Status
+		revision.GitHubPath = syncResult.Path
+		revision.GitHubURL = syncResult.URL
+		revision.GitHubFiles = service.MarshalGitHubFiles(syncResult.Files)
+		revision.GitHubSyncError = ""
+		if err := h.skillSvc.UpdateSkillRevision(revision); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存复核结果失败"})
+			return
+		}
+	} else {
+		revision.GitHubSyncStatus = service.GitHubSyncStatusDisabled
+		revision.GitHubSyncError = ""
+		if err := h.skillSvc.UpdateSkillRevision(revision); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存复核结果失败"})
+			return
+		}
+	}
+
+	updated, err := h.skillSvc.ApplyApprovedRevision(revision.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "应用更新失败"})
+		return
+	}
+
+	if h.skillContextProvider != nil {
+		if err := h.skillContextProvider.RefreshSkillsContext(c.Request.Context()); err != nil {
+			log.Printf("refresh skills context after human review failed: %v", err)
+		}
+	}
+	updated.ThumbnailURL = normalizeThumbnailURL(updated.ThumbnailURL)
+	c.JSON(http.StatusOK, gin.H{"skill": updated})
 }

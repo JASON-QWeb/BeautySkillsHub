@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	"skill-hub/internal/service"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -95,6 +97,36 @@ func (h *SkillHandler) GetSkill(c *gin.Context) {
 			skill.Favorited = favorited
 		}
 	}
+	c.JSON(http.StatusOK, skill)
+}
+
+// GetReviewTarget handles GET /api/skills/:id/review-target.
+func (h *SkillHandler) GetReviewTarget(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 ID"})
+		return
+	}
+
+	skill, err := h.getSkillResource(uint(id))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "资源不存在"})
+		return
+	}
+
+	revision, err := h.skillSvc.GetActiveRevision(skill.ID)
+	if err == nil {
+		view := service.BuildSkillReviewView(skill, revision)
+		view.ThumbnailURL = normalizeThumbnailURL(view.ThumbnailURL)
+		c.JSON(http.StatusOK, view)
+		return
+	}
+	if err != nil && !isNotFoundError(err) {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "加载审核对象失败"})
+		return
+	}
+
+	skill.ThumbnailURL = normalizeThumbnailURL(skill.ThumbnailURL)
 	c.JSON(http.StatusOK, skill)
 }
 

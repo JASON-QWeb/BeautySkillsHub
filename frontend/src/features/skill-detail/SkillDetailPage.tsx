@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useI18n } from '../../i18n/I18nProvider'
-import { DeleteProgressStage, Skill, deleteSkill, deleteSkillWithProgress, favoriteSkill, fetchSkill, fetchSkillInstallConfig, fetchSkillReadme, getDownloadUrl, likeSkill, submitHumanReview, trackDownloadHit, unfavoriteSkill, unlikeSkill } from '../../services/api'
+import { DeleteProgressStage, Skill, deleteSkill, deleteSkillWithProgress, favoriteSkill, fetchSkill, fetchSkillInstallConfig, fetchSkillReadme, getDownloadUrl, likeSkill, trackDownloadHit, unfavoriteSkill, unlikeSkill } from '../../services/api'
 import { useDialog } from '../../contexts/DialogContext'
 import LoadingBars from '../../components/LoadingBars'
 import { formatDate, formatSize } from './formatters'
@@ -136,6 +136,11 @@ function FallbackThumb({ name, description }: { name: string; description?: stri
 }
 
 const readmeGlobalCache = new Map<number, string>()
+
+/** Invalidate readme cache for a specific skill so detail page re-fetches fresh content. */
+export function invalidateReadmeCache(skillId: number) {
+    readmeGlobalCache.delete(skillId)
+}
 type DeleteFlowStage = DeleteProgressStage | 'done'
 const DELETE_FLOW_ORDER: DeleteFlowStage[] = ['db', 'github', 'done']
 
@@ -168,7 +173,6 @@ function SkillDetailPage({ resourceTypeOverride }: SkillDetailPageProps) {
     const [deleteStage, setDeleteStage] = useState<DeleteFlowStage>('db')
     const [deleteGithubWarning, setDeleteGithubWarning] = useState('')
     const [copied, setCopied] = useState(false)
-    const [reviewingHuman, setReviewingHuman] = useState(false)
     const [liking, setLiking] = useState(false)
     const [likesCount, setLikesCount] = useState(0)
     const [userLiked, setUserLiked] = useState(false)
@@ -185,6 +189,13 @@ function SkillDetailPage({ resourceTypeOverride }: SkillDetailPageProps) {
         const load = async () => {
             setLoading(true)
             const numericId = Number(id)
+
+            // Invalidate readme cache if navigating back after a review/update
+            const stateAny = location.state as { refreshReadme?: boolean } | null
+            if (stateAny?.refreshReadme) {
+                readmeGlobalCache.delete(numericId)
+            }
+
             try {
                 // If we already have this readme in memory, use it instead of refetching
                 let readmePromise: Promise<string>
@@ -245,9 +256,17 @@ function SkillDetailPage({ resourceTypeOverride }: SkillDetailPageProps) {
         return isPublished ? 'approved' : 'pending'
     }, [skill, isPublished])
 
-    const canHumanReview = useMemo(() => {
-        return !!user && !!skill && skill.ai_approved && !canManage && humanReviewStatus === 'pending'
-    }, [user, skill, canManage, humanReviewStatus])
+    const hasPendingRevision = useMemo(() => {
+        return !!skill?.has_pending_revision
+    }, [skill?.has_pending_revision])
+
+    const activeHumanReviewStatus = useMemo(() => {
+        if (hasPendingRevision) {
+            return skill?.pending_revision_human || 'pending'
+        }
+        return humanReviewStatus
+    }, [hasPendingRevision, humanReviewStatus, skill?.pending_revision_human])
+
 
     const canLike = useMemo(() => {
         return !!user && !!skill && skill.ai_approved
@@ -266,6 +285,7 @@ function SkillDetailPage({ resourceTypeOverride }: SkillDetailPageProps) {
     const isMcpType = currentResourceType === 'mcp'
     const isToolsType = currentResourceType === 'tools'
     const requiresReview = isSkillType || isRulesType
+    const showsHumanReviewPanel = requiresReview || hasPendingRevision
 
     useEffect(() => {
         if (!isSkillType) return
@@ -395,7 +415,36 @@ function SkillDetailPage({ resourceTypeOverride }: SkillDetailPageProps) {
 
             <div className="detail-layout">
                 <main className="detail-main">
-                    <h1 className="detail-title">{skill.name}</h1>
+                    <div className="detail-title-row">
+                        <h1 className="detail-title">{skill.name}</h1>
+                        {requiresReview && canManage && hasPendingRevision && (
+                            <button
+                                type="button"
+                                className="btn btn-secondary detail-title-action"
+                                onClick={() => navigate(`/review/${skill.id}`, { state: { resourceType: skill.resource_type } })}
+                            >
+                                有未Review的更新
+                            </button>
+                        )}
+                        {requiresReview && canManage && !hasPendingRevision && (
+                            <button
+                                type="button"
+                                className="btn btn-secondary detail-title-action"
+                                onClick={() => navigate(`/resource/${currentResourceType}/upload?edit=${skill.id}`)}
+                            >
+                                {t('detail.update')}
+                            </button>
+                        )}
+                        {requiresReview && !canManage && hasPendingRevision && user && (
+                            <button
+                                type="button"
+                                className="btn btn-secondary detail-title-action"
+                                onClick={() => navigate(`/review/${skill.id}`, { state: { resourceType: skill.resource_type } })}
+                            >
+                                新版本，待Review
+                            </button>
+                        )}
+                    </div>
 
                     {skill.tags && (
                         <div className="detail-tags">
@@ -575,7 +624,7 @@ function SkillDetailPage({ resourceTypeOverride }: SkillDetailPageProps) {
                         </div>
                     </div>
 
-                    {requiresReview && (
+                    {showsHumanReviewPanel && (
                         <div className="detail-sidebar-section">
                             <div className="detail-sidebar-label">{t('detail.securityChecks')}</div>
                             {safetyChecks.length > 0 ? (
@@ -593,38 +642,21 @@ function SkillDetailPage({ resourceTypeOverride }: SkillDetailPageProps) {
                     {requiresReview && (
                         <div className="detail-sidebar-section">
                             <div className="detail-sidebar-label">{t('detail.humanReview')}</div>
-                            <div className={`detail-human-review-status ${humanReviewStatus}`}>
-                                {humanReviewStatus === 'approved' && t('detail.humanReviewApproved')}
-                                {humanReviewStatus === 'pending' && t('detail.humanReviewPending')}
-                                {humanReviewStatus === 'rejected' && t('detail.humanReviewRejected')}
+                            <div className={`detail-human-review-status ${activeHumanReviewStatus}`}>
+                                {activeHumanReviewStatus === 'approved' && t('detail.humanReviewApproved')}
+                                {activeHumanReviewStatus === 'pending' && t('detail.humanReviewPending')}
+                                {activeHumanReviewStatus === 'rejected' && t('detail.humanReviewRejected')}
                             </div>
-                            {skill.human_reviewer && (
+                            {hasPendingRevision && (
+                                <small className="detail-sidebar-value">当前详情展示的是已发布版本，待审核更新请前往 Review 页面。</small>
+                            )}
+                            {!hasPendingRevision && skill.human_reviewer && (
                                 <small className="detail-sidebar-value">
                                     {t('detail.reviewedBy', { user: skill.human_reviewer })}
                                 </small>
                             )}
-                            {canManage && humanReviewStatus === 'pending' && (
+                            {canManage && activeHumanReviewStatus === 'pending' && (
                                 <small className="detail-sidebar-value">{t('detail.humanReviewNeedOtherUser')}</small>
-                            )}
-                            {canHumanReview && (
-                                <button
-                                    type="button"
-                                    className="btn btn-primary"
-                                    onClick={async () => {
-                                        setReviewingHuman(true)
-                                        try {
-                                            const updated = await submitHumanReview(skill.id, skill.resource_type || 'skill', true)
-                                            setSkill(updated)
-                                        } catch (err) {
-                                            await showAlert(err instanceof Error ? err.message : t('detail.humanReviewFailed'))
-                                        } finally {
-                                            setReviewingHuman(false)
-                                        }
-                                    }}
-                                    disabled={reviewingHuman}
-                                >
-                                    {reviewingHuman ? t('detail.humanReviewSubmitting') : t('detail.confirmHumanReview')}
-                                </button>
                             )}
                         </div>
                     )}
@@ -640,28 +672,12 @@ function SkillDetailPage({ resourceTypeOverride }: SkillDetailPageProps) {
                                 打开 GitHub
                             </a>
                         )}
-                        {isSkillType && (
-                            <button
-                                className="btn btn-secondary"
-                                onClick={() => {
-                                    navigate('/resource/skill/upload', {
-                                        state: {
-                                            resourceType: 'skill',
-                                            prefill: {
-                                                source_skill_id: skill.id,
-                                                name: skill.name,
-                                                description: skill.description || '',
-                                                tags: skill.tags || '',
-                                                thumbnail_url: skill.thumbnail_url || '',
-                                            },
-                                        },
-                                    })
-                                }}
-                            >
-                                {t('detail.update')}
+                        {canManage && !requiresReview && hasPendingRevision && (
+                            <button className="btn btn-secondary" disabled>
+                                更新中 / 待 Review
                             </button>
                         )}
-                        {canManage && !isSkillType && (
+                        {canManage && !requiresReview && !hasPendingRevision && (
                             <button
                                 className="btn btn-secondary"
                                 onClick={() => navigate(`/resource/${currentResourceType}/upload?edit=${skill.id}`)}

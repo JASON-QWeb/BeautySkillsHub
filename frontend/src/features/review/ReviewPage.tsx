@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useI18n } from '../../i18n/I18nProvider'
-import { RESOURCE_TYPES, Skill, fetchSkill, submitHumanReview, getDownloadUrl } from '../../services/api'
+import { RESOURCE_TYPES, Skill, fetchReviewTarget, submitHumanReview, getDownloadUrl } from '../../services/api'
 import { useDialog } from '../../contexts/DialogContext'
 import FlowStepIcon from '../../components/FlowStepIcon'
 import '../../styles/upload.css'
@@ -167,14 +167,12 @@ function ReviewPage() {
         const load = async () => {
             if (!id) return
             try {
-                const data = await fetchSkill(Number(id), initialResourceType)
+                const data = await fetchReviewTarget(Number(id), initialResourceType)
                 setSkill(data)
 
-                const isPublished = data.published ?? (data.human_review_status
-                    ? data.human_review_status === 'approved'
-                    : data.ai_approved)
-                if (isPublished) {
-                    navigate(`/resource/${data.resource_type || 'skill'}`, { replace: true })
+                // Only redirect away if the resource is fully published and has no pending revision
+                if (!data.has_pending_revision && data.published) {
+                    navigate(`/resource/${data.resource_type || initialResourceType || 'skill'}/${data.id}`, { replace: true, state: { refreshReadme: true } })
                 }
             } catch (err) {
                 console.error(err)
@@ -184,7 +182,7 @@ function ReviewPage() {
             }
         }
         void load()
-    }, [id, navigate, t])
+    }, [id, initialResourceType, navigate, t])
 
     const reviewProgress = useMemo(() => parseReviewProgress(skill?.ai_review_details), [skill?.ai_review_details])
 
@@ -470,7 +468,7 @@ function ReviewPage() {
                                             setHumanReviewStage('done')
 
                                             await new Promise(resolve => window.setTimeout(resolve, 700))
-                                            navigate(`/resource/${updated.resource_type || skill.resource_type || 'skill'}`, { replace: true })
+                                            navigate(`/resource/${updated.resource_type || skill.resource_type || 'skill'}/${updated.id}`, { replace: true, state: { refreshReadme: true } })
                                         } catch (err) {
                                             if (humanProgressTimerRef.current !== null) {
                                                 window.clearTimeout(humanProgressTimerRef.current)

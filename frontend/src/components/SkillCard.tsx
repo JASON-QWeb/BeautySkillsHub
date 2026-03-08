@@ -88,8 +88,7 @@ function SkillCard({ skill, onFavoriteChange }: Props) {
     const isPublished = skill.published ?? (skill.human_review_status
         ? skill.human_review_status === 'approved'
         : skill.ai_approved)
-    const isPendingReview = skill.ai_approved && !isPublished
-    const isPendingReviewedResource = isPendingReview && (skill.resource_type === 'skill' || skill.resource_type === 'rules')
+    const hasPendingRevision = !!skill.has_pending_revision
     const [likesCount, setLikesCount] = useState(skill.likes_count || 0)
     const [userLiked, setUserLiked] = useState(!!skill.user_liked)
     const [liking, setLiking] = useState(false)
@@ -113,18 +112,27 @@ function SkillCard({ skill, onFavoriteChange }: Props) {
         && ((skill.user_id ? skill.user_id === user.id : false)
             || (skill.author || '').trim().toLowerCase() === user.username.trim().toLowerCase())
 
+    const handleCardClick = (e: React.MouseEvent) => {
+        const target = e.target as HTMLElement
+        if (target.closest('button')) return
+
+        if (!isPublished) {
+            // First-time upload not yet published: go to review page (login required)
+            if (!user) {
+                showAlert('请先登录后查看审核详情')
+                return
+            }
+            navigate(`/review/${skill.id}`, { state: { resourceType: skill.resource_type } })
+            return
+        }
+
+        navigate(`/resource/${skill.resource_type || 'skill'}/${skill.id}`, { state: { resourceType: skill.resource_type } })
+    }
+
     return (
         <article
             className="skill-card glass-card"
-            onClick={(e) => {
-                const target = e.target as HTMLElement
-                if (target.closest('button')) return
-                if (isPendingReviewedResource) {
-                    navigate(`/review/${skill.id}`, { state: { resourceType: skill.resource_type } })
-                } else {
-                    navigate(`/resource/${skill.resource_type || 'skill'}/${skill.id}`, { state: { resourceType: skill.resource_type } })
-                }
-            }}
+            onClick={handleCardClick}
             id={`skill-card-${skill.id}`}
         >
             {skill.thumbnail_url ? (
@@ -154,8 +162,11 @@ function SkillCard({ skill, onFavoriteChange }: Props) {
                             type="button"
                             className="skill-card-edit-btn"
                             aria-label="编辑资源"
+                            title={hasPendingRevision ? '当前已有更新在审核中' : '编辑资源'}
+                            disabled={hasPendingRevision}
                             onClick={e => {
                                 e.stopPropagation()
+                                if (hasPendingRevision) return
                                 navigate(`/resource/${skill.resource_type}/upload?edit=${skill.id}`)
                             }}
                         >

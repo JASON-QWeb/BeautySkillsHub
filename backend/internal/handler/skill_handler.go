@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -21,7 +22,7 @@ type SkillHandler struct {
 	skillContextProvider skillContextProvider
 	cfg                  *config.Config
 	reviewMu             sync.Mutex
-	reviewRunning        map[uint]struct{}
+	reviewRunning        map[string]struct{}
 }
 
 type skillContextProvider interface {
@@ -42,7 +43,7 @@ func NewSkillHandler(
 		githubSyncSvc:        githubSyncSvc,
 		skillContextProvider: skillContextProvider,
 		cfg:                  cfg,
-		reviewRunning:        make(map[uint]struct{}),
+		reviewRunning:        make(map[string]struct{}),
 	}
 }
 
@@ -64,6 +65,10 @@ func normalizeThumbnailURL(url string) string {
 func isReviewedResourceType(resourceType string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(resourceType))
 	return normalized == "skill" || normalized == "rules"
+}
+
+func reviewQueueKey(kind string, id uint) string {
+	return kind + ":" + strconv.FormatUint(uint64(id), 10)
 }
 
 func (h *SkillHandler) getSkillResource(id uint) (*model.Skill, error) {

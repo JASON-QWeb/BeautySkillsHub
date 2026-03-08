@@ -197,6 +197,13 @@ cd backend && go test ./...
 cd frontend && npm run build
 ```
 
+### docker tips
+
+```bash
+docker compose down -v # 清空全部数据
+docker compose up -d --build
+```
+
 ## 项目结构
 
 ```text

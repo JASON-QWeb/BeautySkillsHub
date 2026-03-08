@@ -96,14 +96,15 @@ func main() {
 		publicReads.GET("/skills/trending", skillHandler.GetTrending)
 		publicReads.GET("/skills/install-config", skillHandler.GetSkillInstallConfig)
 		publicReads.GET("/skills/:id", skillHandler.GetSkill)
-			publicReads.GET("/skills/:id/readme", skillHandler.GetSkillReadme)
-			publicReads.GET("/skills/:id/download", skillHandler.DownloadSkill)
-			publicReads.POST("/skills/:id/download-hit", skillHandler.TrackDownloadHit)
-			// Protected: upload, update & delete require auth
-			api.POST("/skills", authHandler.AuthMiddleware(), uploadLimitMiddleware, skillHandler.UploadSkill)
-			api.GET("/skills/:id/review-status", authHandler.AuthMiddleware(), skillHandler.GetSkillReviewStatus)
-			api.POST("/skills/:id/review/retry", authHandler.AuthMiddleware(), skillHandler.RetrySkillReview)
-			api.PUT("/skills/:id", authHandler.AuthMiddleware(), skillHandler.UpdateSkill)
+		publicReads.GET("/skills/:id/review-target", skillHandler.GetReviewTarget)
+		publicReads.GET("/skills/:id/readme", skillHandler.GetSkillReadme)
+		publicReads.GET("/skills/:id/download", skillHandler.DownloadSkill)
+		publicReads.POST("/skills/:id/download-hit", skillHandler.TrackDownloadHit)
+		// Protected: upload, update & delete require auth
+		api.POST("/skills", authHandler.AuthMiddleware(), uploadLimitMiddleware, skillHandler.UploadSkill)
+		api.GET("/skills/:id/review-status", authHandler.AuthMiddleware(), skillHandler.GetSkillReviewStatus)
+		api.POST("/skills/:id/review/retry", authHandler.AuthMiddleware(), skillHandler.RetrySkillReview)
+		api.PUT("/skills/:id", authHandler.AuthMiddleware(), uploadLimitMiddleware, skillHandler.UpdateSkill)
 		api.DELETE("/skills/:id/stream-delete", authHandler.AuthMiddleware(), skillHandler.StreamDeleteSkill)
 		api.DELETE("/skills/:id", authHandler.AuthMiddleware(), skillHandler.DeleteSkill)
 		api.POST("/skills/:id/human-review", authHandler.AuthMiddleware(), skillHandler.HumanReviewSkill)
@@ -116,10 +117,10 @@ func main() {
 		// Categories
 		api.GET("/categories", skillHandler.GetCategories)
 
-			// Thumbnail serving
-			api.GET("/thumbnails/:filename", skillHandler.ServeThumbnail)
-			api.GET("/content-assets/:filename", contentAssetHandler.ServeImage)
-			api.POST("/content-assets/images", authHandler.AuthMiddleware(), contentAssetLimitMiddleware, contentAssetHandler.UploadImage)
+		// Thumbnail serving
+		api.GET("/thumbnails/:filename", skillHandler.ServeThumbnail)
+		api.GET("/content-assets/:filename", contentAssetHandler.ServeImage)
+		api.POST("/content-assets/images", authHandler.AuthMiddleware(), contentAssetLimitMiddleware, contentAssetHandler.UploadImage)
 
 		// Avatar serving
 		api.GET("/avatars/:filename", authHandler.ServeAvatar)
@@ -127,11 +128,11 @@ func main() {
 		// AI Chat
 		api.POST("/ai/chat", skillHandler.ChatRecommend)
 
-			// MCP resource routes
-			handler.RegisterResourceRoutes(api, mcpHandler, authHandler.AuthMiddleware(), authHandler.OptionalAuthMiddleware(), uploadLimitMiddleware, "/mcps")
+		// MCP resource routes
+		handler.RegisterResourceRoutes(api, mcpHandler, authHandler.AuthMiddleware(), authHandler.OptionalAuthMiddleware(), uploadLimitMiddleware, "/mcps")
 
-			// Tools resource routes
-			handler.RegisterResourceRoutes(api, toolsHandler, authHandler.AuthMiddleware(), authHandler.OptionalAuthMiddleware(), uploadLimitMiddleware, "/tools")
+		// Tools resource routes
+		handler.RegisterResourceRoutes(api, toolsHandler, authHandler.AuthMiddleware(), authHandler.OptionalAuthMiddleware(), uploadLimitMiddleware, "/tools")
 
 		// Rules resource routes (rules require AI + human review)
 		rulesPublic := api.Group("/rules")
@@ -141,20 +142,21 @@ func main() {
 		rulesPublic.GET("/trending", rulesHandler.GetTrending)
 		rulesPublic.GET("/categories", rulesHandler.GetCategories)
 		rulesPublic.GET("/:id", rulesHandler.Get)
+		rulesPublic.GET("/:id/review-target", rulesHandler.GetReviewTarget)
 		rulesPublic.GET("/:id/readme", rulesHandler.GetReadme)
 		rulesPublic.GET("/:id/download", rulesHandler.Download)
 		rulesPublic.POST("/:id/download-hit", rulesHandler.TrackDownloadHit)
 
-			rulesProtected := api.Group("/rules")
-			rulesProtected.Use(authHandler.AuthMiddleware())
-			rulesProtected.POST("", uploadLimitMiddleware, skillHandler.UploadSkill)
-			rulesProtected.GET("/:id/review-status", skillHandler.GetSkillReviewStatus)
-			rulesProtected.POST("/:id/review/retry", skillHandler.RetrySkillReview)
-			rulesProtected.POST("/:id/human-review", skillHandler.HumanReviewSkill)
-			rulesProtected.PUT("/:id", uploadLimitMiddleware, rulesHandler.Update)
-			rulesProtected.DELETE("/:id", rulesHandler.Delete)
-			rulesProtected.POST("/:id/like", rulesHandler.Like)
-			rulesProtected.DELETE("/:id/like", rulesHandler.Unlike)
+		rulesProtected := api.Group("/rules")
+		rulesProtected.Use(authHandler.AuthMiddleware())
+		rulesProtected.POST("", uploadLimitMiddleware, skillHandler.UploadSkill)
+		rulesProtected.GET("/:id/review-status", skillHandler.GetSkillReviewStatus)
+		rulesProtected.POST("/:id/review/retry", skillHandler.RetrySkillReview)
+		rulesProtected.POST("/:id/human-review", skillHandler.HumanReviewSkill)
+		rulesProtected.PUT("/:id", uploadLimitMiddleware, skillHandler.UpdateSkill)
+		rulesProtected.DELETE("/:id", rulesHandler.Delete)
+		rulesProtected.POST("/:id/like", rulesHandler.Like)
+		rulesProtected.DELETE("/:id/like", rulesHandler.Unlike)
 		rulesProtected.POST("/:id/favorite", rulesHandler.AddFavorite)
 		rulesProtected.DELETE("/:id/favorite", rulesHandler.RemoveFavorite)
 	}

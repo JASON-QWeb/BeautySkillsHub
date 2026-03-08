@@ -78,3 +78,11 @@ npx skills init [name]
 - CLI 请求更新检查 API（`/check-updates`，带 `forceRefresh: true`）对比远端最新哈希。
 - 如果哈希变化，`update` 会重新安装该技能并更新锁文件。
 - 这通常等价于“按来源重新拉取最新版并替换本地技能”，不是单纯本地 `git pull`。
+
+### 常用命令
+
+| 命令 | 全局 Skill (`-g`) | 项目本地 Skill |
+| :--- | :---: | :---: |
+| `npx skills add` | ✅ 支持 | ✅ 支持 |
+| `npx skills check` | ✅ **检测远程更新** | ❌ 不支持 |
+| `npx skills update` | ✅ **一键升级** | ❌ 不支持 |

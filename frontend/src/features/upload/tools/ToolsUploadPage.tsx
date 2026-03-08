@@ -215,6 +215,14 @@ function ToolsUploadPage() {
                     return
                 }
 
+                if (skill.has_pending_revision) {
+                    await showAlert('当前已有更新在审核中，请等待本次 Review 完成')
+                    if (!cancelled) {
+                        navigate(`/resource/tools/${editId}`, { replace: true })
+                    }
+                    return
+                }
+
                 setName(skill.name || '')
                 setTags(skill.tags || '')
                 setDescription(skill.description || '')
