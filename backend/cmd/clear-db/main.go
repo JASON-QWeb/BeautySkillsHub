@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
-	"log"
 
 	"skill-hub/internal/config"
+	"skill-hub/internal/logging"
 	"skill-hub/internal/model"
 
 	"gorm.io/driver/postgres"
@@ -20,15 +20,16 @@ type purgeStats struct {
 
 func main() {
 	cfg := config.Load()
+	logging.Init(cfg.AppEnv)
 
 	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{})
 	if err != nil {
-		log.Fatalf("数据库连接失败: %v", err)
+		logging.Fatal("数据库连接失败", "error", err)
 	}
 
 	stats, err := purgeAllData(db)
 	if err != nil {
-		log.Fatalf("清理失败: %v", err)
+		logging.Fatal("清理失败", "error", err)
 	}
 
 	fmt.Printf("已清空数据库数据（DB: %s）\n", cfg.DatabaseURL)

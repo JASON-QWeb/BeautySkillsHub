@@ -2,7 +2,7 @@ package handler
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -146,7 +146,7 @@ func (h *SkillHandler) DownloadSkill(c *gin.Context) {
 	}
 
 	if err := incrementDownloadCounter(h.skillSvc, uint(id)); err != nil {
-		log.Printf("download count increment failed for skill %d: %v", id, err)
+		slog.Warn("download count increment failed for skill", "skill_id", id, "error", err)
 	}
 
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", skill.FileName))

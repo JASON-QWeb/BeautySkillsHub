@@ -3,11 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"time"
 
 	"skill-hub/internal/config"
 	"skill-hub/internal/handler"
+	"skill-hub/internal/logging"
 	"skill-hub/internal/middleware"
 	"skill-hub/internal/service"
 	"skill-hub/internal/service/ai"
@@ -21,11 +22,16 @@ import (
 func main() {
 	// Load config
 	cfg := config.Load()
+	logging.Init(cfg.AppEnv)
 
 	// Connect database
 	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{})
 	if err != nil {
-		log.Fatalf("数据库连接失败: %v", err)
+		logging.Fatal("数据库连接失败", "error", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		logging.Fatal("数据库底层连接获取失败", "error", err)
 	}
 
 	// Initialize services
@@ -44,14 +50,14 @@ func main() {
 
 		pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		if err := redisClient.Ping(pingCtx).Err(); err != nil {
-			log.Printf("⚠️  Redis 不可用，将回退数据库查询: %v", err)
+			slog.Warn("Redis 不可用，将回退数据库查询", "error", err)
 		} else {
 			skillContextCache = service.NewRedisSkillContextCache(redisClient)
-			log.Printf("✅ Redis 缓存已启用: %s (db=%d)", cfg.RedisAddr, cfg.RedisDB)
+			slog.Info("Redis 缓存已启用", "addr", cfg.RedisAddr, "db", cfg.RedisDB)
 		}
 		cancel()
 	} else {
-		log.Println("ℹ️  Redis 未配置，AI 上下文将回退数据库查询")
+		slog.Info("Redis 未配置，AI 上下文将回退数据库查询")
 	}
 
 	skillContextProvider := service.NewSkillContextProvider(
@@ -61,7 +67,7 @@ func main() {
 		cfg.AISkillsInvalidateChannel,
 	)
 	if err := skillContextProvider.RefreshSkillsContext(context.Background()); err != nil {
-		log.Printf("⚠️  启动预热 AI skills 上下文失败: %v", err)
+		slog.Warn("启动预热 AI skills 上下文失败", "error", err)
 	}
 
 	// Initialize handlers
@@ -78,6 +84,7 @@ func main() {
 	r.MaxMultipartMemory = handler.MultipartFormMemoryLimit
 	r.Use(middleware.SecurityHeaders(securityHeadersConfigFromConfig(cfg)))
 	r.Use(middleware.CORS(corsConfigFromConfig(cfg)))
+	registerHealthRoute(r, sqlDB.Ping)
 
 	uploadLimitMiddleware := middleware.LimitMultipartBody(handler.MaxUploadRequestBodySize, handler.MultipartFormMemoryLimit)
 	contentAssetLimitMiddleware := middleware.LimitMultipartBody(handler.MaxContentAssetRequestBodySize, handler.MultipartFormMemoryLimit)
@@ -116,6 +123,7 @@ func main() {
 		api.POST("/skills/:id/favorite", authHandler.AuthMiddleware(), skillHandler.AddFavoriteSkill)
 		api.DELETE("/skills/:id/favorite", authHandler.AuthMiddleware(), skillHandler.RemoveFavoriteSkill)
 		api.GET("/me/favorites", authHandler.AuthMiddleware(), skillHandler.ListMyFavorites)
+		api.GET("/me/uploads", authHandler.AuthMiddleware(), skillHandler.ListMyUploads)
 
 		// Categories
 		api.GET("/categories", skillHandler.GetCategories)
@@ -166,14 +174,14 @@ func main() {
 
 	// Start server
 	addr := fmt.Sprintf(":%s", cfg.Port)
-	log.Printf("🚀 Skill Hub 后端启动在 http://localhost%s", addr)
+	slog.Info("Skill Hub 后端启动", "addr", addr)
 	if cfg.OpenAIKey != "" {
-		log.Println("✅ OpenAI API Key 已配置")
+		slog.Info("OpenAI API Key 已配置")
 	} else {
-		log.Println("⚠️  OpenAI API Key 未配置，AI 功能将以降级模式运行")
+		slog.Warn("OpenAI API Key 未配置，AI 功能将以降级模式运行")
 	}
 
 	if err := r.Run(addr); err != nil {
-		log.Fatalf("服务器启动失败: %v", err)
+		logging.Fatal("服务器启动失败", "error", err)
 	}
 }

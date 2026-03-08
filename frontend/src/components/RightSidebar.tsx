@@ -37,28 +37,32 @@ function RightSidebar({ resourceType = '' }: RightSidebarProps) {
     const [tagCounts, setTagCounts] = useState<Record<string, number>>({})
 
     useEffect(() => {
+        const controller = new AbortController()
         const load = async () => {
             try {
                 const [trendingData, recentData] = await Promise.all([
-                    fetchTrending(10, resourceType),
-                    fetchSkills('', 1, 5, '', resourceType),
+                    fetchTrending(10, resourceType, { signal: controller.signal }),
+                    fetchSkills('', 1, 5, '', resourceType, { signal: controller.signal }),
                 ])
                 setTrending(trendingData || [])
                 setRecent(recentData.skills || [])
             } catch (err) {
+                if ((err as Error).name === 'AbortError') return
                 console.error('Failed to load sidebar data', err)
                 setTrending([])
                 setRecent([])
             }
         }
 
-        load()
+        void load()
+        return () => controller.abort()
     }, [resourceType])
 
     useEffect(() => {
+        const controller = new AbortController()
         const loadTags = async () => {
             try {
-                const data = await fetchSkills('', 1, 100, '', resourceType)
+                const data = await fetchSkills('', 1, 100, '', resourceType, { signal: controller.signal })
                 const counts: Record<string, number> = {}
                 for (const skill of data.skills || []) {
                     if (skill.tags) {
@@ -72,12 +76,14 @@ function RightSidebar({ resourceType = '' }: RightSidebarProps) {
                 }
                 setTagCounts(counts)
             } catch (err) {
+                if ((err as Error).name === 'AbortError') return
                 console.error('Failed to load tag composition', err)
                 setTagCounts({})
             }
         }
 
-        loadTags()
+        void loadTags()
+        return () => controller.abort()
     }, [resourceType])
 
     const topTags = useMemo(() => {

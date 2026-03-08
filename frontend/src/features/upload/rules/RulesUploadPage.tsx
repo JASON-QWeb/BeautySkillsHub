@@ -69,31 +69,25 @@ function RulesUploadPage() {
             return
         }
 
-        let cancelled = false
+        const controller = new AbortController()
         setPrefillLoading(true)
 
         void Promise.all([
-            fetchSkill(editId, 'rules'),
-            fetchSkillReadme(editId, 'rules').catch(() => ''),
+            fetchSkill(editId, 'rules', { signal: controller.signal }),
+            fetchSkillReadme(editId, 'rules', { signal: controller.signal }).catch(() => ''),
         ])
             .then(async ([skill, readme]) => {
-                if (cancelled) return
-
                 const canEdit = (skill.user_id ? skill.user_id === user.id : false)
                     || (skill.author || '').trim().toLowerCase() === user.username.trim().toLowerCase()
                 if (!canEdit) {
                     await showAlert('仅上传者本人可以编辑该 Rules 资源')
-                    if (!cancelled) {
-                        navigate(`/resource/rules/${editId}`, { replace: true })
-                    }
+                    navigate(`/resource/rules/${editId}`, { replace: true })
                     return
                 }
 
                 if (skill.has_pending_revision) {
                     await showAlert('当前已有更新在审核中，请等待本次 Review 完成')
-                    if (!cancelled) {
-                        navigate(`/resource/rules/${editId}`, { replace: true })
-                    }
+                    navigate(`/resource/rules/${editId}`, { replace: true })
                     return
                 }
 
@@ -108,20 +102,18 @@ function RulesUploadPage() {
                 setFile(null)
             })
             .catch(async err => {
-                if (cancelled) return
+                if ((err as Error).name === 'AbortError') return
                 await showAlert(err instanceof Error ? err.message : '加载待编辑资源失败')
-                if (!cancelled) {
-                    navigate('/resource/rules', { replace: true })
-                }
+                navigate('/resource/rules', { replace: true })
             })
             .finally(() => {
-                if (!cancelled) {
+                if (!controller.signal.aborted) {
                     setPrefillLoading(false)
                 }
             })
 
         return () => {
-            cancelled = true
+            controller.abort()
         }
     }, [editId, isEditMode, navigate, showAlert, user])
 

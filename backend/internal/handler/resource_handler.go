@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -223,7 +223,7 @@ func (h *ResourceHandler) Download(c *gin.Context) {
 	}
 
 	if err := incrementDownloadCounter(h.skillSvc, uint(id)); err != nil {
-		log.Printf("download count increment failed for resource %d: %v", id, err)
+		slog.Warn("download count increment failed for resource", "resource_id", id, "resource_type", h.resourceType, "error", err)
 	}
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", skill.FileName))
 	c.File(skill.FilePath)

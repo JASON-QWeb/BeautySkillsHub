@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useI18n } from '../../i18n/I18nProvider'
 import { RESOURCE_TYPES, Skill, fetchReviewTarget, submitHumanReview, getDownloadUrl } from '../../services/api'
+import { isAbortError } from '../../services/api/request'
 import { useDialog } from '../../contexts/DialogContext'
 import FlowStepIcon from '../../components/FlowStepIcon'
 import '../../styles/upload.css'
@@ -164,10 +165,11 @@ function ReviewPage() {
     }, [])
 
     useEffect(() => {
+        const controller = new AbortController()
         const load = async () => {
             if (!id) return
             try {
-                const data = await fetchReviewTarget(Number(id), initialResourceType)
+                const data = await fetchReviewTarget(Number(id), initialResourceType, { signal: controller.signal })
                 setSkill(data)
 
                 // Only redirect away if the resource is fully published and has no pending revision
@@ -175,13 +177,17 @@ function ReviewPage() {
                     navigate(`/resource/${data.resource_type || initialResourceType || 'skill'}/${data.id}`, { replace: true, state: { refreshReadme: true } })
                 }
             } catch (err) {
+                if (isAbortError(err)) return
                 console.error(err)
                 setError(t('detail.loadFailed'))
             } finally {
-                setLoading(false)
+                if (!controller.signal.aborted) {
+                    setLoading(false)
+                }
             }
         }
         void load()
+        return () => controller.abort()
     }, [id, initialResourceType, navigate, t])
 
     const reviewProgress = useMemo(() => parseReviewProgress(skill?.ai_review_details), [skill?.ai_review_details])

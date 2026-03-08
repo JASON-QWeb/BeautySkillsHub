@@ -2,7 +2,7 @@ package handler
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -108,7 +108,7 @@ func (h *SkillHandler) deleteSkillResource(ctx context.Context, skill *model.Ski
 
 	if h.skillContextProvider != nil {
 		if err := h.skillContextProvider.RefreshSkillsContext(ctx); err != nil {
-			log.Printf("refresh skills context after delete failed: %v", err)
+			slog.Warn("refresh skills context after delete failed", "skill_id", skill.ID, "error", err)
 		}
 	}
 
@@ -128,7 +128,7 @@ func (h *SkillHandler) deleteSkillFromGitHub(ctx context.Context, skill *model.S
 	githubFiles := service.UnmarshalGitHubFiles(skill.GitHubFiles)
 	if len(githubFiles) > 0 {
 		if err := h.githubSyncSvc.DeleteSkillFilesFromGitHub(ctx, githubFiles); err != nil {
-			log.Printf("delete skill %d github manifest files failed: %v", skill.ID, err)
+			slog.Warn("delete skill github manifest files failed", "skill_id", skill.ID, "error", err)
 			return err.Error()
 		}
 		return ""
@@ -138,7 +138,7 @@ func (h *SkillHandler) deleteSkillFromGitHub(ctx context.Context, skill *model.S
 		return ""
 	}
 	if err := h.githubSyncSvc.DeleteSkillFromGitHub(ctx, skill.GitHubPath); err != nil {
-		log.Printf("delete skill %d from github failed: %v", skill.ID, err)
+		slog.Warn("delete skill from github failed", "skill_id", skill.ID, "path", skill.GitHubPath, "error", err)
 		return err.Error()
 	}
 	return ""

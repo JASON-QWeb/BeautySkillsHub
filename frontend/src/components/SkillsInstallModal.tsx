@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { fetchSkillInstallConfig } from '../services/api'
+import { isAbortError } from '../services/api/request'
 import { AIChatCharacter } from './AIChatCharacter'
 
 interface SkillsInstallModalProps {
@@ -32,22 +33,21 @@ export function SkillsInstallModal({ isOpen, onClose }: SkillsInstallModalProps)
     useEffect(() => {
         if (!isOpen) return
 
-        let cancelled = false
-        void fetchSkillInstallConfig()
+        const controller = new AbortController()
+        void fetchSkillInstallConfig({ signal: controller.signal })
             .then(config => {
-                if (cancelled) return
                 setInstallConfig({
                     github_repo: config.github_repo || FALLBACK_CONFIG.github_repo,
                     github_base_dir: config.github_base_dir || FALLBACK_CONFIG.github_base_dir,
                 })
             })
-            .catch(() => {
-                if (cancelled) return
+            .catch(err => {
+                if (isAbortError(err)) return
                 setInstallConfig(FALLBACK_CONFIG)
             })
 
         return () => {
-            cancelled = true
+            controller.abort()
         }
     }, [isOpen])
 

@@ -1,16 +1,19 @@
 import { API_BASE } from './client'
+import { apiFetch } from './request'
 
 export async function chatWithAI(
     message: string,
     onChunk: (text: string) => void,
     onDone: () => void,
     onError: (error: string) => void,
+    signal?: AbortSignal,
 ): Promise<void> {
     try {
-        const res = await fetch(`${API_BASE}/ai/chat`, {
+        const res = await apiFetch(`${API_BASE}/ai/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message }),
+            signal,
         })
 
         if (!res.ok) {
