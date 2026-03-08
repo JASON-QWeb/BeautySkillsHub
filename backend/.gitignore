@@ -8,6 +8,8 @@ thumbnails/
 
 # Binaries for programs and plugins
 server
+!cmd/server/
+!cmd/server/*.go
 *.exe
 *.exe~
 *.dll
