@@ -43,7 +43,7 @@ jobs:
           cache-dependency-path: backend/go.sum
 
       - name: Run migrations
-        run: ./scripts/run-all-migrations.sh
+        run: ./scripts/local.sh migrate
 
       - name: Run backend tests
         run: cd backend && go test ./...
@@ -66,7 +66,9 @@ jobs:
         run: cd frontend && npm ci
 
       - name: Run frontend node tests
-        run: cd frontend && npm run test:node
+        run: |
+          node --test scripts/local-script.test.mjs
+          cd frontend && npm run test:node
 
       - name: Build frontend
         run: cd frontend && npm run build

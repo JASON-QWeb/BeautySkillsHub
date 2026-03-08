@@ -171,7 +171,7 @@ cd frontend && npm ci && npm run build
 
 ```bash
 export DATABASE_URL='postgres://skillhub:strong-password@postgres-host:5432/skillhub_prod?sslmode=require'
-./scripts/run-all-migrations.sh
+cd backend && go run ./cmd/migrate -database-url "$DATABASE_URL" -migrations-dir ../db/migrations
 ```
 
 要求：
@@ -296,7 +296,7 @@ update code -> migrate -> backend -> frontend -> verify
 ```bash
 git pull
 export DATABASE_URL='postgres://skillhub:strong-password@postgres-host:5432/skillhub_prod?sslmode=require'
-./scripts/run-all-migrations.sh
+cd backend && go run ./cmd/migrate -database-url "$DATABASE_URL" -migrations-dir ../db/migrations
 
 docker build -t skill-hub-backend:latest ./backend
 docker build -t skill-hub-frontend:latest ./frontend

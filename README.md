@@ -47,7 +47,10 @@ Skill Hub 是一个前后端分离的资源平台，当前支持四类内容：
 - 默认值已经内置在 [docker-compose.yml](./docker-compose.yml)
 - 如果你要接入自己的 OpenAI / GitHub token，再通过 shell 环境变量覆盖即可
 
-如果你走“宿主机直接跑 backend/frontend”的开发流，再准备本地 env 文件。
+如果你走“宿主机直接跑 backend/frontend”的开发流：
+
+- 可以先直接用 `./scripts/local.sh` 跑起来
+- 只有在你要覆盖默认本地配置时，才需要准备本地 env 文件
 
 ### 2. 宿主机开发时准备环境文件
 
@@ -92,16 +95,21 @@ docker compose down -v
 
 ### 4. 宿主机开发流
 
-如果你想直接在本机跑 backend/frontend：
+如果你想直接在本机跑 backend/frontend，推荐直接用：
 
 ```bash
-./scripts/db-local.sh
-./scripts/run-all-migrations.sh
-cd backend && go run ./cmd/server/main.go
-cd frontend && npm ci && npm run dev
+./scripts/local.sh dev
 ```
 
-完整开发说明见 [DEVELOPMENT.md](./DEVELOPMENT.md)。
+如果你想拆开执行数据库、迁移和 seed，也统一走：
+
+```bash
+./scripts/local.sh db up
+./scripts/local.sh migrate
+./scripts/local.sh seed
+```
+
+完整开发说明见 [DEVELOPMENT.md](./DEVELOPMENT.md) 和 [scripts/README.md](./scripts/README.md)。
 
 ## 当前项目事实
 
@@ -130,6 +138,9 @@ cd frontend && npm run test:node
 ## 文档地图
 
 - 开发指南：[DEVELOPMENT.md](./DEVELOPMENT.md)
+- 本地脚本说明：[scripts/README.md](./scripts/README.md)
+- Backend 说明：[backend/README.md](./backend/README.md)
+- Frontend 说明：[frontend/README.md](./frontend/README.md)
 - 架构总览：[ARCHITECTURE.md](./ARCHITECTURE.md)
 - 部署手册：[DEPLOYMENT.md](./DEPLOYMENT.md)
 - AI 审核流程：[ai-review流程.md](./ai-review流程.md)

@@ -14,7 +14,7 @@
 
 ## 2. 环境文件
 
-如果你要跑宿主机开发流，先准备：
+如果你要覆盖默认本地配置，再准备：
 
 ```bash
 cp backend/.env.local.example backend/.env.local
@@ -26,7 +26,7 @@ cp frontend/.env.local.example frontend/.env.local
 - [backend/.env.local.example](./backend/.env.local.example)
 - [frontend/.env.local.example](./frontend/.env.local.example)
 
-宿主机开发默认值里：
+不额外配置时，本地默认值里：
 
 - `DATABASE_URL` 指向本地 PostgreSQL
 - `JWT_SECRET` 使用本地开发值
@@ -81,7 +81,7 @@ docker compose down -v
 #### Step 1：启动 PostgreSQL 和 Redis
 
 ```bash
-./scripts/db-local.sh
+./scripts/local.sh db up
 ```
 
 底层编排文件：
@@ -91,13 +91,13 @@ docker compose down -v
 #### Step 2：执行 migration
 
 ```bash
-./scripts/run-all-migrations.sh
+./scripts/local.sh migrate
 ```
 
 #### Step 3：可选灌本地 seed
 
 ```bash
-./scripts/seed-local.sh
+./scripts/local.sh seed
 ```
 
 #### Step 4：启动 backend
@@ -118,7 +118,7 @@ npm run dev
 ### 3.3 方式 C：一个终端启动宿主机开发流
 
 ```bash
-./scripts/dev-all.sh
+./scripts/local.sh dev
 ```
 
 默认行为：
@@ -132,7 +132,7 @@ npm run dev
 如果不想自动 seed：
 
 ```bash
-SEED_LOCAL=0 ./scripts/dev-all.sh
+SEED_LOCAL=0 ./scripts/local.sh dev
 ```
 
 ## 4. 本地访问地址
@@ -145,43 +145,32 @@ SEED_LOCAL=0 ./scripts/dev-all.sh
 
 ## 5. 常用脚本
 
-### 启动本地数据库
+统一入口是：
 
 ```bash
-./scripts/db-local.sh
+./scripts/local.sh help
 ```
 
-### 执行全部 migration
+常用子命令：
 
-```bash
-./scripts/run-all-migrations.sh
-```
+- `./scripts/local.sh db up`
+- `./scripts/local.sh db down`
+- `./scripts/local.sh db down -v`
+- `./scripts/local.sh db logs`
+- `./scripts/local.sh migrate`
+- `./scripts/local.sh seed`
+- `./scripts/local.sh reset`
+- `./scripts/local.sh dev`
 
-### 应用本地 seed
-
-```bash
-./scripts/seed-local.sh
-```
-
-### 清空本地业务数据
-
-```bash
-./scripts/clear-db-data.sh
-```
-
-这个脚本会：
-
-- 调用 [backend/cmd/clear-db](./backend/cmd/clear-db)
-- 清空业务表数据
-- 清空 `backend/uploads`、`backend/thumbnails`、`backend/avatars`
+详细说明见 [scripts/README.md](./scripts/README.md)。
 
 ## 6. 测试与验证
 
 ### backend 全量测试
 
 ```bash
-./scripts/db-local.sh
-./scripts/run-all-migrations.sh
+./scripts/local.sh db up
+./scripts/local.sh migrate
 cd backend && go test ./...
 ```
 
@@ -224,6 +213,7 @@ docker build -f frontend/Dockerfile frontend
 
 - API 启动入口：[backend/cmd/server/main.go](./backend/cmd/server/main.go)
 - migration 入口：[backend/cmd/migrate/main.go](./backend/cmd/migrate/main.go)
+- 本地脚本入口：[scripts/local.sh](./scripts/local.sh)
 - profile 上传分页接口：[backend/internal/handler/profile_handlers.go](./backend/internal/handler/profile_handlers.go)
 - 前端请求层：[frontend/src/services/api/request.ts](./frontend/src/services/api/request.ts)
 - AI 审核流程：[ai-review流程.md](./ai-review流程.md)
