@@ -1,125 +1,192 @@
 # Skill Hub 部署指南
 
-本文档给出基于 Docker Compose 的生产部署步骤。
+本文档描述 PostgreSQL + migration-first 的部署流程。
 
-## 1. 服务器准备
+## 1. 目标部署模型
+
+共享环境和生产环境统一采用：
+
+- 外部 PostgreSQL
+- 可选 Redis
+- backend 运行时环境变量注入
+- frontend 公开环境变量注入
+- 先执行 migration，再发布应用
+
+固定顺序：
+
+```text
+migrate -> backend -> frontend
+```
+
+## 2. 服务器准备
 
 建议环境：
+
 - Linux x86_64
-- Docker Engine + Docker Compose Plugin（`docker compose version` 可用）
-- 可访问外网（拉镜像；若启用 OpenAI/GitHub 集成则还需访问对应 API）
+- Go 1.25+（如果在服务器上直接跑 migration 脚本）
+- Node.js 20+（如果在服务器上直接构建 frontend）
+- 可访问 PostgreSQL
+- 若启用 OpenAI/GitHub 集成，则需访问对应外部 API
 
-说明：
-- 前端字体已随项目静态资源打包（`frontend/public/fonts`），页面渲染不依赖 Google Fonts 外链
+如果采用容器化部署，请确保：
 
-开放端口：
-- `3000/tcp`（前端入口）
+- backend 容器能访问 PostgreSQL
+- frontend 只暴露公开配置
+- migration 作为独立步骤执行，而不是由 backend 启动触发
 
-## 2. 拉取代码并配置环境
+## 3. 环境变量
 
-```bash
-git clone <your-repo-url> Skill_Hub
-cd Skill_Hub
-cp backend/.env.example backend/.env
-```
+### Backend 必需
 
-必须修改的变量（`backend/.env`）：
-- `JWT_SECRET`：生产环境必须替换为高强度随机串
-- `backend/.env` 仅用于服务器本地，不要提交到 Git 仓库
+- `APP_ENV`
+- `PORT`
+- `DATABASE_URL`
+- `JWT_SECRET`
 
-按需启用：
-- OpenAI：`OPENAI_API_KEY`、`OPENAI_BASE_URL`、`OPENAI_MODEL`
-- GitHub 同步：`GITHUB_SYNC_ENABLED=true` + `GITHUB_TOKEN/GITHUB_OWNER/GITHUB_REPO`
-- Redis：`REDIS_ADDR`（例如 `redis:6379`）
+### Backend 按需
 
-## 3. 启动服务
+- `REDIS_ADDR`
+- `REDIS_PASSWORD`
+- `REDIS_DB`
+- `OPENAI_API_KEY`
+- `OPENAI_BASE_URL`
+- `OPENAI_MODEL`
+- `GITHUB_SYNC_ENABLED`
+- `GITHUB_TOKEN`
+- `GITHUB_OWNER`
+- `GITHUB_REPO`
+- `GITHUB_BRANCH`
+- `GITHUB_BASE_DIR`
 
-```bash
-docker compose up -d --build
-docker compose ps
-docker compose logs -f backend
-```
+### Frontend 公开变量
 
-访问地址：
-- `http://<server-ip>:3000`
+- `VITE_APP_ENV`
+- `VITE_API_BASE_URL`
 
-## 4. 健康检查
+不要把任何 secret 放进 frontend。
 
-### 4.1 容器状态
+## 4. 发布前准备
 
-```bash
-docker compose ps
-```
+1. 创建或确认目标 PostgreSQL 已可用
+2. 配置 `DATABASE_URL`
+3. 确认 migration 文件已随代码发布
+4. 确认 backend 将不再依赖启动时自动建表
 
-预期：`frontend`、`backend`、`redis` 均为 `Up`。
+如果仓库托管在 GitHub，可先让：
 
-### 4.2 API 检查
+- `.github/workflows/verify.yml`
 
-```bash
-curl -i http://<server-ip>:3000/api/skills
-```
+完成基础校验，再进入你们企业内部发布流程。
 
-预期：返回 `200` 与 JSON 列表结构。
+## 5. 执行 migration
 
-## 5. 数据持久化
-
-Compose 已配置持久化卷：
-- `db_data`：SQLite 数据库
-- `uploads`：上传文件
-- `thumbnails`：缩略图
-- `avatars`：头像
-
-## 6. 备份与恢复
-
-### 6.1 备份数据库
+在部署环境注入 `DATABASE_URL` 后执行：
 
 ```bash
-mkdir -p backups
-docker run --rm \
-  -v skill_hub_db_data:/data \
-  -v "$(pwd)/backups:/backup" \
-  alpine sh -c 'cp /data/skill_hub.db /backup/skill_hub_$(date +%F_%H%M%S).db'
+./scripts/run-all-migrations.sh
 ```
 
-### 6.2 恢复数据库
+要求：
 
-```bash
-docker compose down
-docker run --rm \
-  -v skill_hub_db_data:/data \
-  -v "$(pwd)/backups:/backup" \
-  alpine sh -c 'cp /backup/<backup-file>.db /data/skill_hub.db'
-docker compose up -d
+- 失败即停止发布
+- migration 成功后才能继续发布 backend
+
+## 6. 发布 backend
+
+确认 migration 成功后，发布 backend。
+
+backend 启动时应只做：
+
+- 连接数据库
+- 初始化缓存/外部服务
+- 提供 API
+
+backend 不应再做：
+
+- 自动建表
+- 自动修复 schema
+- 自动跑结构迁移
+
+## 7. 发布 frontend
+
+backend 发布成功并完成健康检查后，再发布 frontend。
+
+frontend 只需要公开配置，例如：
+
+- `VITE_APP_ENV=stg`
+- `VITE_API_BASE_URL=https://your-backend.example.com`
+
+## 8. 升级字段或表结构的标准流程
+
+每次 schema 变更都按下面步骤：
+
+1. 新建 migration 文件
+2. 先在本地和测试环境验证
+3. 在共享环境执行 migration
+4. 发布 backend
+5. 再发布 frontend（如需要）
+
+对于破坏性变更，拆成多次发布：
+
+1. 新增字段
+2. 回填数据
+3. 代码切换到新字段
+4. 删除旧字段
+
+## 9. 本地和生产的边界
+
+本地可以用：
+
+- `./scripts/db-local.sh`
+- `./scripts/run-all-migrations.sh`
+- `./scripts/seed-local.sh`
+
+生产不要依赖：
+
+- `backend/.env.local`
+- SQLite 文件
+- 本地 Docker volume 当作生产数据库
+
+## 10. 常见问题
+
+### 10.0 GitHub Actions 和部署是什么关系
+
+本仓库内的 GitHub Actions workflow 只负责：
+
+1. verify
+2. backend test
+3. frontend build
+
+它不是完整部署流水线。  
+正式发布仍然建议按：
+
+```text
+migrate -> backend -> frontend
 ```
 
-## 7. 升级发布
+详细说明见 [GITHUB_ACTIONS.md](./GITHUB_ACTIONS.md) 和 [CI_CD_TEMPLATE.md](./CI_CD_TEMPLATE.md)。
 
-```bash
-git pull
-docker compose up -d --build
-docker compose logs -f backend
-```
+### 10.1 migration 执行失败
 
-## 8. 常见问题
+处理顺序：
 
-### 8.1 `Cannot connect to the Docker daemon`
+1. 停止后续发布
+2. 查看失败的 migration 文件
+3. 修复后重新执行 migration
+4. 确认 schema 状态一致后再继续发布
 
-Docker 未启动。先启动 Docker Desktop/Engine，再执行 `docker compose ...`。
-
-### 8.2 前端能打开但接口 502/504
-
-排查顺序：
-1. `docker compose ps` 看 `backend` 是否在运行
-2. `docker compose logs -f backend` 看启动报错
-3. 检查 `backend/.env` 中关键变量是否缺失
-
-### 8.3 上传 Skill 返回 409
-
-表示 GitHub 中同名技能目录已存在。请改技能名后重试（设计行为，不自动重命名）。
-
-### 8.4 OpenAI/GitHub 调用失败
+### 10.2 backend 启动失败
 
 检查：
-1. Key/Token 是否正确
-2. 服务器是否能访问外网
-3. `backend` 日志中具体错误信息
+
+1. `DATABASE_URL` 是否正确
+2. migration 是否已成功执行
+3. PostgreSQL 网络是否可达
+
+### 10.3 frontend 调不到接口
+
+检查：
+
+1. `VITE_API_BASE_URL` 是否正确
+2. backend 是否已发布成功
+3. 反向代理或网关是否已放通

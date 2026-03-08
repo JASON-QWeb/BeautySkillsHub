@@ -8,13 +8,14 @@ import (
 )
 
 type Config struct {
+	AppEnv        string
 	Port          string
 	OpenAIKey     string
 	OpenAIBaseURL string
 	OpenAIModel   string
 	UploadDir     string
 	ThumbnailDir  string
-	DBPath        string
+	DatabaseURL   string
 
 	GitHubSyncEnabled bool
 	GitHubToken       string
@@ -31,17 +32,20 @@ type Config struct {
 }
 
 func Load() *Config {
+	loadDotEnv(".env.local")
+	loadDotEnv("backend/.env.local")
 	loadDotEnv(".env")
 	loadDotEnv("backend/.env")
 
 	cfg := &Config{
+		AppEnv:        getEnv("APP_ENV", "local"),
 		Port:          getEnv("PORT", "8080"),
 		OpenAIKey:     getEnv("OPENAI_API_KEY", ""),
 		OpenAIBaseURL: getEnv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
 		OpenAIModel:   getEnv("OPENAI_MODEL", "gpt-4o-mini"),
 		UploadDir:     getEnv("UPLOAD_DIR", "./uploads"),
 		ThumbnailDir:  getEnv("THUMBNAIL_DIR", "./thumbnails"),
-		DBPath:        getEnv("DB_PATH", "./skill_hub.db"),
+		DatabaseURL:   getEnv("DATABASE_URL", "postgres://skillhub:skillhub@localhost:5432/skillhub_local?sslmode=disable"),
 
 		GitHubSyncEnabled: getEnvBool("GITHUB_SYNC_ENABLED", false),
 		GitHubToken:       getEnv("GITHUB_TOKEN", ""),

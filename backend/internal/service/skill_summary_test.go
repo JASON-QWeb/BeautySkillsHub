@@ -1,29 +1,18 @@
 package service
 
 import (
-	"path/filepath"
 	"testing"
 	"time"
 
 	"skill-hub/internal/model"
-
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
+	"skill-hub/internal/testutil"
 )
 
 func newSkillServiceForSummaryTest(t *testing.T) *SkillService {
 	t.Helper()
 
-	dsn := filepath.Join(t.TempDir(), "summary.db")
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(&model.Skill{}); err != nil {
-		t.Fatalf("migrate schema: %v", err)
-	}
-
-	return NewSkillService(db)
+	tdb := testutil.OpenPostgresTestDB(t)
+	return NewSkillService(tdb.DB)
 }
 
 func createSummarySkill(t *testing.T, svc *SkillService, sk model.Skill) {

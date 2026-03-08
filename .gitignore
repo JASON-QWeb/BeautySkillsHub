@@ -9,6 +9,8 @@
 .env.development.local
 .env.test.local
 .env.production.local
+backend/.env.local
+frontend/.env.local
 
 # Logs
 logs
@@ -57,5 +59,3 @@ temp/
 .agents
 skills-lock.json
 .claude
-docs
-

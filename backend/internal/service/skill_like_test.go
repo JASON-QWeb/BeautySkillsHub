@@ -4,23 +4,14 @@ import (
 	"testing"
 
 	"skill-hub/internal/model"
-
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
+	"skill-hub/internal/testutil"
 )
 
 func newSkillServiceForLikesTest(t *testing.T) *SkillService {
 	t.Helper()
 
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(&model.Skill{}, &model.SkillLike{}); err != nil {
-		t.Fatalf("migrate schema: %v", err)
-	}
-
-	return NewSkillService(db)
+	tdb := testutil.OpenPostgresTestDB(t)
+	return NewSkillService(tdb.DB)
 }
 
 func createLikeTestSkill(t *testing.T, svc *SkillService, name string) model.Skill {

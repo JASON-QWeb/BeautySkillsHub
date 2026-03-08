@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS skill_favorites;
+DROP TABLE IF EXISTS skill_likes;
+DROP TABLE IF EXISTS skills;
+DROP TABLE IF EXISTS users;

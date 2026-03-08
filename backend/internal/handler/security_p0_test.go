@@ -11,24 +11,17 @@ import (
 	"skill-hub/internal/config"
 	"skill-hub/internal/model"
 	"skill-hub/internal/service"
+	"skill-hub/internal/testutil"
 
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )
 
 func newSkillServiceForSecurityP0Test(t *testing.T) *service.SkillService {
 	t.Helper()
 
-	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "security_p0.db")), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	if err := db.AutoMigrate(&model.Skill{}, &model.SkillLike{}, &model.SkillFavorite{}); err != nil {
-		t.Fatalf("migrate schema: %v", err)
-	}
-
-	return service.NewSkillService(db)
+	tdb := testutil.OpenPostgresTestDB(t)
+	return service.NewSkillService(tdb.DB)
 }
 
 func TestSkillHandlerGetSkillResource_RejectsNonSkillType(t *testing.T) {

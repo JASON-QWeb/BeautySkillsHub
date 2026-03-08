@@ -9,13 +9,12 @@ import (
 	"skill-hub/internal/config"
 	"skill-hub/internal/handler"
 	"skill-hub/internal/middleware"
-	"skill-hub/internal/model"
 	"skill-hub/internal/service"
 	"skill-hub/internal/service/ai"
 
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
 	"github.com/redis/go-redis/v9"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -24,32 +23,9 @@ func main() {
 	cfg := config.Load()
 
 	// Connect database
-	db, err := gorm.Open(sqlite.Open(cfg.DBPath), &gorm.Config{})
+	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("数据库连接失败: %v", err)
-	}
-
-	// Auto migrate
-	if err := db.AutoMigrate(&model.Skill{}, &model.User{}, &model.SkillLike{}, &model.SkillFavorite{}); err != nil {
-		log.Fatalf("数据库迁移失败: %v", err)
-	}
-
-	// Backfill legacy rows before human-review fields existed.
-	if err := db.Model(&model.Skill{}).
-		Where("ai_approved = ? AND (human_review_status IS NULL OR human_review_status = '')", true).
-		Updates(map[string]interface{}{
-			"human_review_status": model.HumanReviewStatusApproved,
-			"published":           true,
-		}).Error; err != nil {
-		log.Printf("⚠️  迁移旧数据（已通过 AI）失败: %v", err)
-	}
-	if err := db.Model(&model.Skill{}).
-		Where("ai_approved = ? AND (human_review_status IS NULL OR human_review_status = '')", false).
-		Updates(map[string]interface{}{
-			"human_review_status": model.HumanReviewStatusRejected,
-			"published":           false,
-		}).Error; err != nil {
-		log.Printf("⚠️  迁移旧数据（AI 未通过）失败: %v", err)
 	}
 
 	// Initialize services
