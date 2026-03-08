@@ -49,6 +49,25 @@ export interface SkillListResponse {
     page_size: number
 }
 
+export interface ProfileActivity {
+    kind: 'published' | 'reviewed' | 'approved'
+    target: string
+    resource_type: string
+    occurred_at: string
+}
+
+export interface ProfileUploadsStats {
+    total_items: number
+    total_downloads: number
+    total_likes: number
+}
+
+export interface ProfileUploadsResponse extends SkillListResponse {
+    stats: ProfileUploadsStats
+    top_tags: string[]
+    activities: ProfileActivity[]
+}
+
 export interface UploadResponse {
     skill: Skill
     approved: boolean

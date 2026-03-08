@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react'
+import { useEffect } from 'react'
+import { getDialogEscapeResult } from './dialogKeyboard'
 
 type DialogType = 'alert' | 'confirm'
 
@@ -56,6 +58,19 @@ export function DialogProvider({ children }: { children: ReactNode }) {
             dialog.resolve(value)
         }
     }
+
+    useEffect(() => {
+        if (!dialog.isOpen) return
+
+        const onKeyDown = (event: KeyboardEvent) => {
+            const result = getDialogEscapeResult(event.key, dialog.type)
+            if (result === null) return
+            handleClose(result)
+        }
+
+        document.addEventListener('keydown', onKeyDown)
+        return () => document.removeEventListener('keydown', onKeyDown)
+    }, [dialog.isOpen, dialog.type])
 
     return (
         <DialogContext.Provider value={{ showAlert, showConfirm }}>

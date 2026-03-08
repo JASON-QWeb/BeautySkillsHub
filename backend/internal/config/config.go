@@ -105,7 +105,30 @@ func Load() *Config {
 		AIChatRateLimitCapacity:      getEnvInt("RATE_LIMIT_AI_CHAT_CAPACITY", 20),
 		AIChatRateLimitWindow:        getEnvDuration("RATE_LIMIT_AI_CHAT_WINDOW", time.Minute),
 	}
+	validateRuntimeSecurity(cfg)
 	return cfg
+}
+
+func isLocalAppEnv(appEnv string) bool {
+	normalized := strings.TrimSpace(strings.ToLower(appEnv))
+	return normalized == "" || normalized == "local"
+}
+
+func validateRuntimeSecurity(cfg *Config) {
+	if cfg == nil {
+		panic("config must not be nil")
+	}
+	if isLocalAppEnv(cfg.AppEnv) {
+		return
+	}
+
+	dbURL := strings.TrimSpace(cfg.DatabaseURL)
+	if dbURL == "" {
+		panic("DATABASE_URL must be set outside local environment")
+	}
+	if strings.Contains(strings.ToLower(dbURL), "sslmode=disable") {
+		panic("DATABASE_URL must not use sslmode=disable outside local environment")
+	}
 }
 
 func defaultCORSAllowedOrigins(appEnv string) []string {

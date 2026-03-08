@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useI18n } from '../i18n/I18nProvider'
+import { createMouseMoveScheduler } from './aiMouseTracking'
 
 export type SkinType = 'default' | 'robot' | 'ninja' | 'cat' | 'ghost' | 'dragon'
 export const SKINS: SkinType[] = ['default', 'robot', 'ninja', 'cat', 'ghost', 'dragon']
@@ -38,9 +39,20 @@ export function AIChatCharacter({ isOpen, isTyping, showOnboarding, onClick, cla
     }, [])
 
     useEffect(() => {
-        const onMove = (e: MouseEvent) => { setMouseX(e.clientX); setMouseY(e.clientY) }
+        const scheduleMouseMove = createMouseMoveScheduler(
+            requestAnimationFrame,
+            cancelAnimationFrame,
+            (x, y) => {
+                setMouseX(x)
+                setMouseY(y)
+            },
+        )
+        const onMove = (e: MouseEvent) => { scheduleMouseMove(e.clientX, e.clientY) }
         window.addEventListener('mousemove', onMove)
-        return () => window.removeEventListener('mousemove', onMove)
+        return () => {
+            window.removeEventListener('mousemove', onMove)
+            scheduleMouseMove.cancel()
+        }
     }, [])
 
     useEffect(() => {

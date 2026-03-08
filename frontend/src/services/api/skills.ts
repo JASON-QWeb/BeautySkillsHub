@@ -1,16 +1,14 @@
 import { API_BASE } from './client'
-import { Skill, SkillInstallConfigResponse, SkillListResponse, SkillReviewStatusResponse, SkillSummaryResponse, UploadResponse } from './types'
+import { apiFetch } from './request'
+import { ProfileUploadsResponse, Skill, SkillInstallConfigResponse, SkillListResponse, SkillReviewStatusResponse, SkillSummaryResponse, UploadResponse } from './types'
 
 type SkillUpdatePayload = {
     name?: string
     description?: string
 }
 
-function getAuthHeaders(): Record<string, string> {
-    const token = localStorage.getItem('auth_token')
-    const headers: Record<string, string> = {}
-    if (token) headers.Authorization = `Bearer ${token}`
-    return headers
+type RequestOptions = {
+    signal?: AbortSignal
 }
 
 function normalizeTagsForUpload(raw: string): string {
@@ -37,6 +35,7 @@ function getResourcePath(resourceType: string): string {
 export async function fetchSkills(
     search = '', page = 1, pageSize = 20,
     category = '', resourceType = '',
+    options: RequestOptions = {},
 ): Promise<SkillListResponse> {
     const params = new URLSearchParams({
         page: String(page),
@@ -59,59 +58,63 @@ export async function fetchSkills(
         basePath = '/skills'
     }
 
-    const res = await fetch(`${API_BASE}${basePath}?${params}`, {
-        headers: getAuthHeaders(),
+    const res = await apiFetch(`${API_BASE}${basePath}?${params}`, {
+        auth: true,
+        signal: options.signal,
     })
     if (!res.ok) throw new Error('Failed to fetch list')
     return res.json()
 }
 
-export async function fetchCategories(resourceType = ''): Promise<string[]> {
+export async function fetchCategories(resourceType = '', options: RequestOptions = {}): Promise<string[]> {
     if (resourceType && resourceType !== 'skill') {
         // Use type-specific endpoint
         const basePath = getResourcePath(resourceType)
-        const res = await fetch(`${API_BASE}${basePath}/categories`)
+        const res = await apiFetch(`${API_BASE}${basePath}/categories`, { auth: true, signal: options.signal })
         if (!res.ok) throw new Error('Failed to fetch categories')
         return res.json()
     }
 
     const params = new URLSearchParams()
     if (resourceType) params.set('resource_type', resourceType)
-    const res = await fetch(`${API_BASE}/categories?${params}`)
+    const res = await apiFetch(`${API_BASE}/categories?${params}`, { auth: true, signal: options.signal })
     if (!res.ok) throw new Error('Failed to fetch categories')
     return res.json()
 }
 
-export async function fetchSkill(id: number, resourceType = ''): Promise<Skill> {
+export async function fetchSkill(id: number, resourceType = '', options: RequestOptions = {}): Promise<Skill> {
     // For get-by-ID, /api/skills/:id works for all types (same DB table).
     // But if we know the type, we can use the type-specific endpoint.
     const basePath = resourceType ? getResourcePath(resourceType) : '/skills'
-    const res = await fetch(`${API_BASE}${basePath}/${id}`, {
-        headers: getAuthHeaders(),
+    const res = await apiFetch(`${API_BASE}${basePath}/${id}`, {
+        auth: true,
+        signal: options.signal,
     })
     if (!res.ok) throw new Error('Failed to fetch details')
     return res.json()
 }
 
-export async function fetchReviewTarget(id: number, resourceType = ''): Promise<Skill> {
+export async function fetchReviewTarget(id: number, resourceType = '', options: RequestOptions = {}): Promise<Skill> {
     const basePath = resourceType ? getResourcePath(resourceType) : '/skills'
-    const res = await fetch(`${API_BASE}${basePath}/${id}/review-target`, {
-        headers: getAuthHeaders(),
+    const res = await apiFetch(`${API_BASE}${basePath}/${id}/review-target`, {
+        auth: true,
+        signal: options.signal,
     })
     if (!res.ok) throw new Error('Failed to fetch review target')
     return res.json()
 }
 
-export async function fetchSkillReadme(id: number, resourceType = ''): Promise<string> {
+export async function fetchSkillReadme(id: number, resourceType = '', options: RequestOptions = {}): Promise<string> {
     const basePath = resourceType ? getResourcePath(resourceType) : '/skills'
-    const res = await fetch(`${API_BASE}${basePath}/${id}/readme`, {
-        headers: getAuthHeaders(),
+    const res = await apiFetch(`${API_BASE}${basePath}/${id}/readme`, {
+        auth: true,
+        signal: options.signal,
     })
     if (!res.ok) return ''
     return res.text()
 }
 
-export async function fetchTrending(limit = 10, resourceType = ''): Promise<Skill[]> {
+export async function fetchTrending(limit = 10, resourceType = '', options: RequestOptions = {}): Promise<Skill[]> {
     const params = new URLSearchParams({ limit: String(limit) })
 
     let basePath: string
@@ -122,18 +125,20 @@ export async function fetchTrending(limit = 10, resourceType = ''): Promise<Skil
         params.set('resource_type', '')
     }
 
-    const res = await fetch(`${API_BASE}${basePath}/trending?${params}`, {
-        headers: getAuthHeaders(),
+    const res = await apiFetch(`${API_BASE}${basePath}/trending?${params}`, {
+        auth: true,
+        signal: options.signal,
     })
     if (!res.ok) throw new Error('Failed to fetch trending')
     return res.json()
 }
 
-export async function fetchSkillSummary(resourceType = ''): Promise<SkillSummaryResponse> {
+export async function fetchSkillSummary(resourceType = '', options: RequestOptions = {}): Promise<SkillSummaryResponse> {
     if (resourceType && resourceType !== 'skill') {
         const basePath = getResourcePath(resourceType)
-        const res = await fetch(`${API_BASE}${basePath}/summary`, {
-            headers: getAuthHeaders(),
+        const res = await apiFetch(`${API_BASE}${basePath}/summary`, {
+            auth: true,
+            signal: options.signal,
         })
         if (!res.ok) throw new Error('Failed to fetch summary')
         return res.json()
@@ -141,16 +146,18 @@ export async function fetchSkillSummary(resourceType = ''): Promise<SkillSummary
 
     const params = new URLSearchParams()
     if (resourceType) params.set('resource_type', resourceType)
-    const res = await fetch(`${API_BASE}/skills/summary?${params}`, {
-        headers: getAuthHeaders(),
+    const res = await apiFetch(`${API_BASE}/skills/summary?${params}`, {
+        auth: true,
+        signal: options.signal,
     })
     if (!res.ok) throw new Error('Failed to fetch summary')
     return res.json()
 }
 
-export async function fetchSkillInstallConfig(): Promise<SkillInstallConfigResponse> {
-    const res = await fetch(`${API_BASE}/skills/install-config`, {
-        headers: getAuthHeaders(),
+export async function fetchSkillInstallConfig(options: RequestOptions = {}): Promise<SkillInstallConfigResponse> {
+    const res = await apiFetch(`${API_BASE}/skills/install-config`, {
+        auth: true,
+        signal: options.signal,
     })
     if (!res.ok) throw new Error('Failed to fetch install config')
     return res.json()
@@ -166,9 +173,9 @@ export async function uploadSkill(formData: FormData): Promise<UploadResponse> {
     const resourceType = formData.get('resource_type') as string || 'skill'
     const basePath = getResourcePath(resourceType)
 
-    const res = await fetch(`${API_BASE}${basePath}`, {
+    const res = await apiFetch(`${API_BASE}${basePath}`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        auth: true,
         body: formData,
     })
     if (!res.ok) {
@@ -214,8 +221,8 @@ export async function fetchSkillReviewStatus(id: number, resourceType = 'skill')
     }
 
     const basePath = getResourcePath(resourceType)
-    const res = await fetch(`${API_BASE}${basePath}/${id}/review-status`, {
-        headers: getAuthHeaders(),
+    const res = await apiFetch(`${API_BASE}${basePath}/${id}/review-status`, {
+        auth: true,
     })
     if (!res.ok) {
         const err = await res.json()
@@ -226,9 +233,9 @@ export async function fetchSkillReviewStatus(id: number, resourceType = 'skill')
 
 export async function retrySkillReview(id: number, resourceType = 'skill'): Promise<{ message: string; status: SkillReviewStatusResponse }> {
     const basePath = getResourcePath(resourceType)
-    const res = await fetch(`${API_BASE}${basePath}/${id}/review/retry`, {
+    const res = await apiFetch(`${API_BASE}${basePath}/${id}/review/retry`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        auth: true,
     })
     if (!res.ok) {
         const err = await res.json()
@@ -239,9 +246,9 @@ export async function retrySkillReview(id: number, resourceType = 'skill'): Prom
 
 export async function deleteSkill(id: number, resourceType = ''): Promise<{ message: string; github_error?: string }> {
     const basePath = resourceType ? getResourcePath(resourceType) : '/skills'
-    const res = await fetch(`${API_BASE}${basePath}/${id}`, {
+    const res = await apiFetch(`${API_BASE}${basePath}/${id}`, {
         method: 'DELETE',
-        headers: getAuthHeaders(),
+        auth: true,
     })
     if (!res.ok) {
         const err = await res.json()
@@ -265,9 +272,9 @@ export async function deleteSkillWithProgress(
     onProgress?: (stage: DeleteProgressStage) => void,
 ): Promise<{ message: string; github_error?: string }> {
     const basePath = resourceType ? getResourcePath(resourceType) : '/skills'
-    const res = await fetch(`${API_BASE}${basePath}/${id}/stream-delete`, {
+    const res = await apiFetch(`${API_BASE}${basePath}/${id}/stream-delete`, {
         method: 'DELETE',
-        headers: getAuthHeaders(),
+        auth: true,
     })
     if (!res.ok) {
         const err = await res.json()
@@ -376,12 +383,12 @@ export async function deleteSkillWithProgress(
 
 export async function updateSkill(id: number, payload: SkillUpdatePayload, resourceType = ''): Promise<Skill> {
     const basePath = resourceType ? getResourcePath(resourceType) : '/skills'
-    const res = await fetch(`${API_BASE}${basePath}/${id}`, {
+    const res = await apiFetch(`${API_BASE}${basePath}/${id}`, {
         method: 'PUT',
         headers: {
-            ...getAuthHeaders(),
             'Content-Type': 'application/json',
         },
+        auth: true,
         body: JSON.stringify(payload),
     })
     if (!res.ok) {
@@ -400,9 +407,9 @@ export async function updateResourceFromUpload(id: number, formData: FormData, r
     }
 
     const basePath = getResourcePath(resourceType)
-    const res = await fetch(`${API_BASE}${basePath}/${id}`, {
+    const res = await apiFetch(`${API_BASE}${basePath}/${id}`, {
         method: 'PUT',
-        headers: getAuthHeaders(),
+        auth: true,
         body: formData,
     })
     if (!res.ok) {
@@ -434,12 +441,12 @@ export async function submitHumanReview(
     feedback = '',
 ): Promise<Skill> {
     const basePath = getResourcePath(resourceType)
-    const res = await fetch(`${API_BASE}${basePath}/${id}/human-review`, {
+    const res = await apiFetch(`${API_BASE}${basePath}/${id}/human-review`, {
         method: 'POST',
         headers: {
-            ...getAuthHeaders(),
             'Content-Type': 'application/json',
         },
+        auth: true,
         body: JSON.stringify({ approved, feedback }),
     })
 
@@ -454,9 +461,9 @@ export async function submitHumanReview(
 
 export async function likeSkill(id: number, resourceType = ''): Promise<{ liked: boolean; likes_count: number }> {
     const basePath = resourceType ? getResourcePath(resourceType) : '/skills'
-    const res = await fetch(`${API_BASE}${basePath}/${id}/like`, {
+    const res = await apiFetch(`${API_BASE}${basePath}/${id}/like`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        auth: true,
     })
 
     if (!res.ok) {
@@ -469,9 +476,9 @@ export async function likeSkill(id: number, resourceType = ''): Promise<{ liked:
 
 export async function unlikeSkill(id: number, resourceType = ''): Promise<{ liked: boolean; likes_count: number }> {
     const basePath = resourceType ? getResourcePath(resourceType) : '/skills'
-    const res = await fetch(`${API_BASE}${basePath}/${id}/like`, {
+    const res = await apiFetch(`${API_BASE}${basePath}/${id}/like`, {
         method: 'DELETE',
-        headers: getAuthHeaders(),
+        auth: true,
     })
 
     if (!res.ok) {
@@ -484,9 +491,9 @@ export async function unlikeSkill(id: number, resourceType = ''): Promise<{ like
 
 export async function favoriteSkill(id: number, resourceType = ''): Promise<{ favorited: boolean }> {
     const basePath = resourceType ? getResourcePath(resourceType) : '/skills'
-    const res = await fetch(`${API_BASE}${basePath}/${id}/favorite`, {
+    const res = await apiFetch(`${API_BASE}${basePath}/${id}/favorite`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        auth: true,
     })
     if (!res.ok) {
         const err = await res.json()
@@ -497,9 +504,9 @@ export async function favoriteSkill(id: number, resourceType = ''): Promise<{ fa
 
 export async function unfavoriteSkill(id: number, resourceType = ''): Promise<{ favorited: boolean }> {
     const basePath = resourceType ? getResourcePath(resourceType) : '/skills'
-    const res = await fetch(`${API_BASE}${basePath}/${id}/favorite`, {
+    const res = await apiFetch(`${API_BASE}${basePath}/${id}/favorite`, {
         method: 'DELETE',
-        headers: getAuthHeaders(),
+        auth: true,
     })
     if (!res.ok) {
         const err = await res.json()
@@ -508,13 +515,14 @@ export async function unfavoriteSkill(id: number, resourceType = ''): Promise<{ 
     return res.json()
 }
 
-export async function fetchMyFavorites(resourceType = ''): Promise<Skill[]> {
+export async function fetchMyFavorites(resourceType = '', options: RequestOptions = {}): Promise<Skill[]> {
     const params = new URLSearchParams()
     if (resourceType) params.set('resource_type', resourceType)
     const query = params.toString()
 
-    const res = await fetch(`${API_BASE}/me/favorites${query ? `?${query}` : ''}`, {
-        headers: getAuthHeaders(),
+    const res = await apiFetch(`${API_BASE}/me/favorites${query ? `?${query}` : ''}`, {
+        auth: true,
+        signal: options.signal,
     })
     if (!res.ok) {
         const err = await res.json()
@@ -524,9 +532,34 @@ export async function fetchMyFavorites(resourceType = ''): Promise<Skill[]> {
     return data.skills || []
 }
 
+export async function fetchMyUploads(
+    search = '',
+    page = 1,
+    pageSize = 20,
+    resourceType = '',
+    options: RequestOptions = {},
+): Promise<ProfileUploadsResponse> {
+    const params = new URLSearchParams({
+        page: String(page),
+        page_size: String(pageSize),
+    })
+    if (search) params.set('search', search)
+    if (resourceType) params.set('resource_type', resourceType)
+
+    const res = await apiFetch(`${API_BASE}/me/uploads?${params}`, {
+        auth: true,
+        signal: options.signal,
+    })
+    if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'Fetch uploads failed')
+    }
+    return res.json()
+}
+
 export async function trackDownloadHit(id: number, resourceType = ''): Promise<{ downloads: number }> {
     const basePath = resourceType ? getResourcePath(resourceType) : '/skills'
-    const res = await fetch(`${API_BASE}${basePath}/${id}/download-hit`, {
+    const res = await apiFetch(`${API_BASE}${basePath}/${id}/download-hit`, {
         method: 'POST',
     })
     if (!res.ok) {

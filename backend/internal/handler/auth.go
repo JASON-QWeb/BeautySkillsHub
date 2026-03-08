@@ -3,7 +3,7 @@ package handler
 import (
 	"crypto/rand"
 	"encoding/base64"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -28,8 +28,12 @@ type AuthHandler struct {
 func NewAuthHandler(db *gorm.DB, avatarDir string) *AuthHandler {
 	secret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
 	if secret == "" {
+		appEnv := strings.TrimSpace(strings.ToLower(os.Getenv("APP_ENV")))
+		if appEnv != "" && appEnv != "local" {
+			panic("JWT_SECRET must be set outside local environment")
+		}
 		secret = generateEphemeralJWTSecret()
-		log.Printf("⚠️  JWT_SECRET 未配置，已使用临时随机密钥（重启后 token 将失效）")
+		slog.Warn("JWT_SECRET 未配置，已使用临时随机密钥", "impact", "重启后 token 将失效")
 	}
 	return &AuthHandler{db: db, secret: []byte(secret), avatarDir: avatarDir}
 }
@@ -104,7 +108,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		user.AvatarURL = "/api/avatars/" + avatarFile
 		h.db.Model(&user).Update("avatar_url", user.AvatarURL)
 	} else {
-		log.Printf("Failed to generate avatar for %s: %v", user.Username, err)
+		slog.Warn("failed to generate avatar", "username", user.Username, "error", err)
 	}
 
 	token, err := h.generateToken(user.ID, user.Username)

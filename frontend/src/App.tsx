@@ -6,6 +6,7 @@ import UploadPage from './pages/UploadPage'
 import ReviewPage from './pages/ReviewPage'
 import ProfilePage from './pages/ProfilePage'
 import AIChatWidget from './components/AIChatWidget'
+import AppErrorBoundary from './components/AppErrorBoundary'
 import { AuthProvider } from './contexts/AuthContext'
 import { DialogProvider } from './contexts/DialogContext'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -18,24 +19,26 @@ function LegacySkillDetailRedirect() {
 
 function App() {
     return (
-        <DialogProvider>
-            <AuthProvider>
-                <Navbar />
-                <Routes>
-                    <Route path="/" element={<Navigate to="/resource/all" replace />} />
-                    <Route path="/resource" element={<Navigate to="/resource/all" replace />} />
-                    <Route path="/resource/:type" element={<HomePage />} />
-                    <Route path="/resource/:type/upload" element={<ProtectedRoute><UploadPage /></ProtectedRoute>} />
-                    <Route path="/resource/:type/:id" element={<ResourceDetailPage />} />
-                    <Route path="/skill/:id" element={<LegacySkillDetailRedirect />} />
-                    <Route path="/review/:id" element={<ReviewPage />} />
-                    <Route path="/upload" element={<Navigate to="/resource/skill/upload" replace />} />
-                    <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
-                </Routes>
+        <AppErrorBoundary>
+            <DialogProvider>
+                <AuthProvider>
+                    <Navbar />
+                    <Routes>
+                        <Route path="/" element={<Navigate to="/resource/all" replace />} />
+                        <Route path="/resource" element={<Navigate to="/resource/all" replace />} />
+                        <Route path="/resource/:type" element={<HomePage />} />
+                        <Route path="/resource/:type/upload" element={<ProtectedRoute><UploadPage /></ProtectedRoute>} />
+                        <Route path="/resource/:type/:id" element={<ResourceDetailPage />} />
+                        <Route path="/skill/:id" element={<LegacySkillDetailRedirect />} />
+                        <Route path="/review/:id" element={<ReviewPage />} />
+                        <Route path="/upload" element={<Navigate to="/resource/skill/upload" replace />} />
+                        <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
+                    </Routes>
 
-                <AIChatWidget />
-            </AuthProvider>
-        </DialogProvider>
+                    <AIChatWidget />
+                </AuthProvider>
+            </DialogProvider>
+        </AppErrorBoundary>
     )
 }
 

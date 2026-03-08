@@ -38,6 +38,7 @@ func TestRegisterRejectsWhitespaceOnlyUsername(t *testing.T) {
 }
 
 func TestNewAuthHandler_UsesNonDefaultSecretWhenEnvMissing(t *testing.T) {
+	t.Setenv("APP_ENV", "local")
 	t.Setenv("JWT_SECRET", "")
 
 	tdb := testutil.OpenPostgresTestDB(t)

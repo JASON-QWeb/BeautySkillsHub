@@ -3,7 +3,7 @@ package middleware
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -148,7 +148,7 @@ func NewRateLimitMiddleware(store RateLimitStore, policy RateLimitPolicy, identi
 
 		decision, err := store.Allow(c.Request.Context(), identityValue, now(), policy)
 		if err != nil {
-			log.Printf("rate limiter fallback: %v", err)
+			slog.Warn("rate limiter fallback", "policy", policy.Name, "identity", identityValue, "error", err)
 			c.Next()
 			return
 		}

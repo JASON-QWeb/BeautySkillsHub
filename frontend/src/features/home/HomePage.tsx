@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import LoginModal from '../../components/LoginModal'
 import RightSidebar from '../../components/RightSidebar'
@@ -53,9 +53,10 @@ function HomePage() {
 
     // Load available tags for filter
     useEffect(() => {
+        const controller = new AbortController()
         const loadTags = async () => {
             try {
-                const data = await fetchSkills('', 1, 100, '', resourceTypeFilter)
+                const data = await fetchSkills('', 1, 100, '', resourceTypeFilter, { signal: controller.signal })
                 const counts: Record<string, number> = {}
                 for (const skill of data.skills || []) {
                     if (skill.tags) {
@@ -69,11 +70,13 @@ function HomePage() {
                     .sort((a, b) => b[1] - a[1])
                     .map(([tag]) => tag)
                 setAllTags(sorted)
-            } catch {
+            } catch (err) {
+                if ((err as Error).name === 'AbortError') return
                 setAllTags([])
             }
         }
-        loadTags()
+        void loadTags()
+        return () => controller.abort()
     }, [resourceTypeFilter])
 
     // Close filter dropdown on outside click
@@ -88,40 +91,48 @@ function HomePage() {
     }, [filterOpen])
 
     useEffect(() => {
+        const controller = new AbortController()
         const loadSummary = async () => {
             try {
-                const data = await fetchSkillSummary(resourceTypeFilter)
+                const data = await fetchSkillSummary(resourceTypeFilter, { signal: controller.signal })
                 setSummary({
                     total: data.total || 0,
                     yesterday_new: data.yesterday_new || 0,
                 })
             } catch (err) {
+                if ((err as Error).name === 'AbortError') return
                 console.error('Failed to load summary:', err)
                 setSummary({ total: 0, yesterday_new: 0 })
             }
         }
 
-        loadSummary()
+        void loadSummary()
+        return () => controller.abort()
     }, [resourceTypeFilter])
 
-    const loadSkills = useCallback(async () => {
-        setLoading(true)
-        try {
-            const data = await fetchSkills(search, page, pageSize, '', resourceTypeFilter)
-            setSkills(data.skills || [])
-            setTotal(data.total || 0)
-        } catch (err) {
-            console.error('Failed to load skills:', err)
-            setSkills([])
-            setTotal(0)
-        } finally {
-            setLoading(false)
-        }
-    }, [search, page, resourceTypeFilter])
-
     useEffect(() => {
-        loadSkills()
-    }, [loadSkills])
+        const controller = new AbortController()
+        const loadSkills = async () => {
+            setLoading(true)
+            try {
+                const data = await fetchSkills(search, page, pageSize, '', resourceTypeFilter, { signal: controller.signal })
+                setSkills(data.skills || [])
+                setTotal(data.total || 0)
+            } catch (err) {
+                if ((err as Error).name === 'AbortError') return
+                console.error('Failed to load skills:', err)
+                setSkills([])
+                setTotal(0)
+            } finally {
+                if (!controller.signal.aborted) {
+                    setLoading(false)
+                }
+            }
+        }
+
+        void loadSkills()
+        return () => controller.abort()
+    }, [page, resourceTypeFilter, search])
 
     const totalPages = Math.max(1, Math.ceil(total / pageSize))
 

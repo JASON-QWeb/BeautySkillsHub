@@ -1,28 +1,39 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Skill, fetchTrending } from '../services/api'
+import { isAbortError } from '../services/api/request'
 
 function TrendingList() {
     const [skills, setSkills] = useState<Skill[]>([])
     const [loading, setLoading] = useState(true)
     const navigate = useNavigate()
 
-    const loadTrending = async () => {
-        try {
-            const data = await fetchTrending(10)
-            setSkills(data)
-        } catch (err) {
-            console.error('加载趋势榜单失败:', err)
-        } finally {
-            setLoading(false)
-        }
-    }
-
     useEffect(() => {
-        loadTrending()
+        const controller = new AbortController()
+
+        const loadTrending = async () => {
+            try {
+                const data = await fetchTrending(10, '', { signal: controller.signal })
+                setSkills(data)
+            } catch (err) {
+                if (isAbortError(err)) return
+                console.error('加载趋势榜单失败:', err)
+            } finally {
+                if (!controller.signal.aborted) {
+                    setLoading(false)
+                }
+            }
+        }
+
+        void loadTrending()
         // Refresh every 30 seconds
-        const timer = setInterval(loadTrending, 30000)
-        return () => clearInterval(timer)
+        const timer = setInterval(() => {
+            void loadTrending()
+        }, 30000)
+        return () => {
+            controller.abort()
+            clearInterval(timer)
+        }
     }, [])
 
     return (

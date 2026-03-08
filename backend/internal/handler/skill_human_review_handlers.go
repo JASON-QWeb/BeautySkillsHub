@@ -3,7 +3,7 @@ package handler
 import (
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -105,7 +105,7 @@ func (h *SkillHandler) HumanReviewSkill(c *gin.Context) {
 		}
 		if h.skillContextProvider != nil {
 			if err := h.skillContextProvider.RefreshSkillsContext(c.Request.Context()); err != nil {
-				log.Printf("refresh skills context after human review failed: %v", err)
+				slog.Warn("refresh skills context after human review failed", "skill_id", skill.ID, "error", err)
 			}
 		}
 		skill.ThumbnailURL = normalizeThumbnailURL(skill.ThumbnailURL)
@@ -124,7 +124,7 @@ func (h *SkillHandler) HumanReviewSkill(c *gin.Context) {
 		}
 		if h.skillContextProvider != nil {
 			if err := h.skillContextProvider.RefreshSkillsContext(c.Request.Context()); err != nil {
-				log.Printf("refresh skills context after human review failed: %v", err)
+				slog.Warn("refresh skills context after human review failed", "skill_id", skill.ID, "error", err)
 			}
 		}
 		skill.ThumbnailURL = normalizeThumbnailURL(skill.ThumbnailURL)
@@ -177,7 +177,7 @@ func (h *SkillHandler) HumanReviewSkill(c *gin.Context) {
 
 	if h.skillContextProvider != nil {
 		if err := h.skillContextProvider.RefreshSkillsContext(c.Request.Context()); err != nil {
-			log.Printf("refresh skills context after human review failed: %v", err)
+			slog.Warn("refresh skills context after human review failed", "skill_id", skill.ID, "error", err)
 		}
 	}
 	skill.ThumbnailURL = normalizeThumbnailURL(skill.ThumbnailURL)
@@ -293,7 +293,7 @@ func (h *SkillHandler) humanReviewPendingRevision(
 
 	if h.skillContextProvider != nil {
 		if err := h.skillContextProvider.RefreshSkillsContext(c.Request.Context()); err != nil {
-			log.Printf("refresh skills context after human review failed: %v", err)
+			slog.Warn("refresh skills context after human review failed", "skill_id", updated.ID, "revision_id", revision.ID, "error", err)
 		}
 	}
 	updated.ThumbnailURL = normalizeThumbnailURL(updated.ThumbnailURL)

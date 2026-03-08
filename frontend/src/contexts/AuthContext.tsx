@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react'
 import { API_BASE } from '../services/api/client'
+import { apiFetch, isAbortError, isTokenExpired, setUnauthorizedHandler } from '../services/api/request'
 
 export interface User {
     id: number
@@ -30,6 +31,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.removeItem('auth_token')
     }, [])
 
+    useEffect(() => {
+        setUnauthorizedHandler(() => logout())
+        return () => setUnauthorizedHandler(null)
+    }, [logout])
+
     // Verify token on mount
     useEffect(() => {
         if (!token) {
@@ -37,20 +43,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return
         }
 
-        fetch(`${API_BASE}/auth/me`, {
-            headers: { Authorization: `Bearer ${token}` },
+        if (isTokenExpired(token)) {
+            logout()
+            setLoading(false)
+            return
+        }
+
+        const controller = new AbortController()
+
+        apiFetch(`${API_BASE}/auth/me`, {
+            auth: true,
+            signal: controller.signal,
         })
             .then(res => {
                 if (!res.ok) throw new Error('Invalid token')
                 return res.json()
             })
             .then(setUser)
-            .catch(() => logout())
-            .finally(() => setLoading(false))
+            .catch(err => {
+                if (isAbortError(err)) return
+                logout()
+            })
+            .finally(() => {
+                if (!controller.signal.aborted) {
+                    setLoading(false)
+                }
+            })
+
+        return () => controller.abort()
     }, [token, logout])
 
     const login = async (username: string, password: string) => {
-        const res = await fetch(`${API_BASE}/auth/login`, {
+        const res = await apiFetch(`${API_BASE}/auth/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password }),
@@ -66,7 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const register = async (username: string, password: string) => {
-        const res = await fetch(`${API_BASE}/auth/register`, {
+        const res = await apiFetch(`${API_BASE}/auth/register`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password }),

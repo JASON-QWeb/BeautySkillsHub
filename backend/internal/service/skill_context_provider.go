@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"log"
+	"log/slog"
 )
 
 // SkillContextCache stores serialized skills context for AI prompts.
@@ -43,7 +43,7 @@ func (p *SkillContextProvider) GetSkillsContextJSON(ctx context.Context) (string
 			return cached, nil
 		}
 		if err != nil {
-			log.Printf("skills context cache get failed, fallback to db: %v", err)
+			slog.Warn("skills context cache get failed, fallback to db", "error", err)
 		}
 	}
 
@@ -59,7 +59,7 @@ func (p *SkillContextProvider) RefreshSkillsContext(ctx context.Context) error {
 
 	if p.cache != nil && p.invalidateChannel != "" {
 		if err := p.cache.PublishInvalidate(ctx, p.invalidateChannel, data); err != nil {
-			log.Printf("skills context invalidate publish failed: %v", err)
+			slog.Warn("skills context invalidate publish failed", "error", err)
 		}
 	}
 	return nil
@@ -79,7 +79,7 @@ func (p *SkillContextProvider) rebuildFromDB(ctx context.Context) (string, error
 	data := string(payload)
 	if p.cache != nil && p.cacheKey != "" {
 		if err := p.cache.Set(ctx, p.cacheKey, data); err != nil {
-			log.Printf("skills context cache set failed: %v", err)
+			slog.Warn("skills context cache set failed", "error", err)
 		}
 	}
 	return data, nil

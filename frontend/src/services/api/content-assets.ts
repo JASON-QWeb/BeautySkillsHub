@@ -1,17 +1,13 @@
 import { API_BASE } from './client'
-
-function getAuthHeaders(): Record<string, string> {
-    const token = localStorage.getItem('auth_token')
-    return token ? { Authorization: `Bearer ${token}` } : {}
-}
+import { apiFetch } from './request'
 
 export async function uploadContentImage(file: File): Promise<string> {
     const formData = new FormData()
     formData.append('image', file)
 
-    const res = await fetch(`${API_BASE}/content-assets/images`, {
+    const res = await apiFetch(`${API_BASE}/content-assets/images`, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        auth: true,
         body: formData,
     })
 

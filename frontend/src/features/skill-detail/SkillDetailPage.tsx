@@ -3,11 +3,13 @@ import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { useI18n } from '../../i18n/I18nProvider'
 import { DeleteProgressStage, Skill, deleteSkill, deleteSkillWithProgress, favoriteSkill, fetchSkill, fetchSkillInstallConfig, fetchSkillReadme, getDownloadUrl, likeSkill, trackDownloadHit, unfavoriteSkill, unlikeSkill } from '../../services/api'
+import { isAbortError } from '../../services/api/request'
 import { useDialog } from '../../contexts/DialogContext'
 import LoadingBars from '../../components/LoadingBars'
 import { formatDate, formatSize } from './formatters'
 import { parseMarkdown } from '../detail/shared/markdown'
 import { parseReadmeFrontMatter } from '../detail/shared/frontmatter'
+import { createReadmeCache } from './readmeCache'
 
 function formatDownloads(downloads: number) {
     if (downloads >= 1000) return `${(downloads / 1000).toFixed(1)}K`
@@ -135,7 +137,7 @@ function FallbackThumb({ name, description }: { name: string; description?: stri
     )
 }
 
-const readmeGlobalCache = new Map<number, string>()
+const readmeGlobalCache = createReadmeCache(50)
 
 /** Invalidate readme cache for a specific skill so detail page re-fetches fresh content. */
 export function invalidateReadmeCache(skillId: number) {
@@ -186,6 +188,8 @@ function SkillDetailPage({ resourceTypeOverride }: SkillDetailPageProps) {
     useEffect(() => {
         if (!id) return
 
+        const controller = new AbortController()
+
         const load = async () => {
             setLoading(true)
             const numericId = Number(id)
@@ -199,10 +203,11 @@ function SkillDetailPage({ resourceTypeOverride }: SkillDetailPageProps) {
             try {
                 // If we already have this readme in memory, use it instead of refetching
                 let readmePromise: Promise<string>
-                if (readmeGlobalCache.has(numericId)) {
-                    readmePromise = Promise.resolve(readmeGlobalCache.get(numericId)!)
+                const cachedReadme = readmeGlobalCache.get(numericId)
+                if (cachedReadme !== undefined) {
+                    readmePromise = Promise.resolve(cachedReadme)
                 } else {
-                    readmePromise = fetchSkillReadme(numericId, initialResourceType)
+                    readmePromise = fetchSkillReadme(numericId, initialResourceType, { signal: controller.signal })
                         .then(content => {
                             readmeGlobalCache.set(numericId, content)
                             return content
@@ -211,7 +216,7 @@ function SkillDetailPage({ resourceTypeOverride }: SkillDetailPageProps) {
                 }
 
                 const [data, readme] = await Promise.all([
-                    fetchSkill(numericId, initialResourceType),
+                    fetchSkill(numericId, initialResourceType, { signal: controller.signal }),
                     readmePromise
                 ])
                 
@@ -219,13 +224,17 @@ function SkillDetailPage({ resourceTypeOverride }: SkillDetailPageProps) {
                 setReadmeContent(readme)
                 setError('')
             } catch (err) {
+                if (isAbortError(err)) return
                 setError(err instanceof Error ? err.message : t('detail.loadFailed'))
             } finally {
-                setLoading(false)
+                if (!controller.signal.aborted) {
+                    setLoading(false)
+                }
             }
         }
 
         load()
+        return () => controller.abort()
     }, [id, initialResourceType, t])
 
     useEffect(() => {
@@ -289,24 +298,23 @@ function SkillDetailPage({ resourceTypeOverride }: SkillDetailPageProps) {
 
     useEffect(() => {
         if (!isSkillType) return
-        let cancelled = false
-        void fetchSkillInstallConfig()
+        const controller = new AbortController()
+        void fetchSkillInstallConfig({ signal: controller.signal })
             .then(config => {
-                if (cancelled) return
                 setInstallConfig({
                     github_repo: config.github_repo || 'https://github.com/skillshub/community',
                     github_base_dir: config.github_base_dir || 'skills',
                 })
             })
-            .catch(() => {
-                if (cancelled) return
+            .catch(err => {
+                if (isAbortError(err)) return
                 setInstallConfig(prev => ({
                     github_repo: prev.github_repo || 'https://github.com/skillshub/community',
                     github_base_dir: prev.github_base_dir || 'skills',
                 }))
             })
         return () => {
-            cancelled = true
+            controller.abort()
         }
     }, [isSkillType])
 

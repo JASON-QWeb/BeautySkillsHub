@@ -195,6 +195,7 @@ func TestLoad_SecurityOverrides(t *testing.T) {
 	tmp := t.TempDir()
 
 	t.Setenv("APP_ENV", "production")
+	t.Setenv("DATABASE_URL", "postgres://skillhub:secret@db:5432/skillhub?sslmode=require")
 	t.Setenv("CORS_ALLOWED_ORIGINS", "https://app.example.com, https://admin.example.com")
 	t.Setenv("CORS_ALLOWED_METHODS", "GET,POST,OPTIONS")
 	t.Setenv("CORS_ALLOWED_HEADERS", "Content-Type,Authorization")

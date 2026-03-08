@@ -217,7 +217,7 @@ docker run -d \
   --name frontend \
   --restart unless-stopped \
   --network skill-hub \
-  -p 80:80 \
+  -p 80:8080 \
   skill-hub-frontend:latest
 ```
 

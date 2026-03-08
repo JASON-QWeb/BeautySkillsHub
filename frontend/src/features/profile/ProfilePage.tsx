@@ -2,15 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import SkillCard from '../../components/SkillCard'
 import { useAuth } from '../../contexts/AuthContext'
 import { useI18n } from '../../i18n/I18nProvider'
-import { Skill, fetchMyFavorites, fetchSkills } from '../../services/api'
+import { ProfileActivity, Skill, fetchMyFavorites, fetchMyUploads } from '../../services/api'
 import { buildProfileActivityAction } from './profileActivity'
 
 type TabKey = 'uploads' | 'saved' | 'activity'
-
-function isOwnedByUser(skill: Skill, userID: number, username: string): boolean {
-    if (skill.user_id && skill.user_id > 0) return skill.user_id === userID
-    return (skill.author || '').trim().toLowerCase() === username.trim().toLowerCase()
-}
 
 function hashText(input: string): number {
     let hash = 0
@@ -25,71 +20,77 @@ function ProfilePage() {
     const { language, t } = useI18n()
     const [skills, setSkills] = useState<Skill[]>([])
     const [favoriteSkills, setFavoriteSkills] = useState<Skill[]>([])
+    const [activities, setActivities] = useState<ProfileActivity[]>([])
+    const [topTags, setTopTags] = useState<string[]>([])
+    const [stats, setStats] = useState({ total_items: 0, total_downloads: 0, total_likes: 0 })
+    const [totalUploads, setTotalUploads] = useState(0)
+    const [page, setPage] = useState(1)
     const [loading, setLoading] = useState(true)
     const [favoritesLoading, setFavoritesLoading] = useState(true)
     const [activeTab, setActiveTab] = useState<TabKey>('uploads')
     const [search, setSearch] = useState('')
     const [typeFilter, setTypeFilter] = useState('all')
 
+    const pageSize = 20
+
     useEffect(() => {
-        const load = async () => {
-            setLoading(true)
+        const controller = new AbortController()
+
+        const loadFavorites = async () => {
             setFavoritesLoading(true)
             try {
-                const [skillsData, favoritesData] = await Promise.all([
-                    fetchSkills('', 1, 500),
-                    fetchMyFavorites(),
-                ])
-                setSkills(skillsData.skills || [])
+                const favoritesData = await fetchMyFavorites('', { signal: controller.signal })
                 setFavoriteSkills(favoritesData || [])
             } catch (err) {
-                console.error('Failed to load profile data:', err)
-                setSkills([])
+                if ((err as Error).name === 'AbortError') return
+                console.error('Failed to load profile favorites:', err)
                 setFavoriteSkills([])
             } finally {
-                setLoading(false)
-                setFavoritesLoading(false)
+                if (!controller.signal.aborted) {
+                    setFavoritesLoading(false)
+                }
             }
         }
-        load()
+
+        void loadFavorites()
+        return () => controller.abort()
     }, [])
 
-    const authoredSkills = useMemo(() => {
-        if (!user?.username || !user?.id) return []
-        return skills.filter(skill => isOwnedByUser(skill, user.id, user.username))
-    }, [skills, user])
+    useEffect(() => {
+        const controller = new AbortController()
 
-    const topUploadedTags = useMemo(() => {
-        const tagStats = new Map<string, { label: string; count: number; index: number }>()
-        let index = 0
-
-        for (const skill of authoredSkills) {
-            const tags = (skill.tags || '')
-                .split(',')
-                .map(tag => tag.trim())
-                .filter(Boolean)
-
-            for (const tag of tags) {
-                const key = tag.toLowerCase()
-                const existing = tagStats.get(key)
-                if (existing) {
-                    existing.count += 1
-                    continue
+        const loadUploads = async () => {
+            setLoading(true)
+            try {
+                const resourceType = typeFilter === 'all' ? '' : typeFilter
+                const uploadsData = await fetchMyUploads(search, page, pageSize, resourceType, { signal: controller.signal })
+                setSkills(uploadsData.skills || [])
+                setTotalUploads(uploadsData.total || 0)
+                setStats(uploadsData.stats || { total_items: 0, total_downloads: 0, total_likes: 0 })
+                setTopTags(uploadsData.top_tags || [])
+                setActivities(uploadsData.activities || [])
+            } catch (err) {
+                if ((err as Error).name === 'AbortError') return
+                console.error('Failed to load profile uploads:', err)
+                setSkills([])
+                setTotalUploads(0)
+                setStats({ total_items: 0, total_downloads: 0, total_likes: 0 })
+                setTopTags([])
+                setActivities([])
+            } finally {
+                if (!controller.signal.aborted) {
+                    setLoading(false)
                 }
-
-                tagStats.set(key, { label: tag, count: 1, index })
-                index += 1
             }
         }
 
-        return Array.from(tagStats.values())
-            .sort((a, b) => {
-                if (b.count !== a.count) return b.count - a.count
-                return a.index - b.index
-            })
-            .slice(0, 3)
-            .map(item => item.label)
-    }, [authoredSkills])
+        void loadUploads()
+        return () => controller.abort()
+    }, [page, search, typeFilter])
+
+    useEffect(() => {
+        setPage(1)
+    }, [search, typeFilter])
 
     const profileBio = useMemo(() => {
         const options = [
@@ -108,19 +109,14 @@ function ProfilePage() {
         return options[index]
     }, [t, user])
 
-    const totalDownloads = useMemo(() => {
-        return authoredSkills.reduce((sum, skill) => sum + (skill.downloads || 0), 0)
-    }, [authoredSkills])
-
-    const totalLikes = useMemo(() => {
-        return authoredSkills.reduce((sum, skill) => sum + (skill.likes_count || 0), 0)
-    }, [authoredSkills])
-
+    const totalDownloads = useMemo(() => stats.total_downloads, [stats.total_downloads])
+    const totalLikes = useMemo(() => stats.total_likes, [stats.total_likes])
     const totalFavorites = favoriteSkills.length
+    const totalPages = Math.max(1, Math.ceil(totalUploads / pageSize))
 
-    const filterAndSortByDownloads = (source: Skill[]) => {
+    const visibleSaved = useMemo(() => {
         const keyword = search.trim().toLowerCase()
-        return source
+        return favoriteSkills
             .filter(skill => {
                 const matchesKeyword = !keyword
                     || skill.name.toLowerCase().includes(keyword)
@@ -134,44 +130,19 @@ function ProfilePage() {
                 if (downloadDelta !== 0) return downloadDelta
                 return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
             })
-    }
+    }, [favoriteSkills, search, typeFilter])
 
-    const visibleUploads = useMemo(() => filterAndSortByDownloads(authoredSkills), [authoredSkills, search, typeFilter])
-    const visibleSaved = useMemo(() => filterAndSortByDownloads(favoriteSkills), [favoriteSkills, search, typeFilter])
-
-    const reviewedSkills = useMemo(() => {
-        if (!user?.id) return []
-        return skills.filter(skill => skill.human_reviewer_id === user.id)
-    }, [skills, user])
-
-    const activities = useMemo(() => {
-        const uploads = authoredSkills.map(skill => ({
-            id: `up-${skill.id}`,
-            action: buildProfileActivityAction(t, 'published', skill.resource_type),
-            target: skill.name,
-            timestamp: new Date(skill.created_at).getTime(),
-            time: new Date(skill.created_at).toLocaleDateString(language === 'zh' ? 'zh-CN' : 'en-US'),
+    const activityItems = useMemo(() => {
+        return activities.map((item, index) => ({
+            id: `${item.kind}-${item.target}-${index}`,
+            action: buildProfileActivityAction(t, item.kind, item.resource_type),
+            target: item.target,
+            time: new Date(item.occurred_at).toLocaleDateString(language === 'zh' ? 'zh-CN' : 'en-US'),
         }))
-
-        const reviews = reviewedSkills.map(skill => ({
-            id: `rev-${skill.id}`,
-            action: buildProfileActivityAction(
-                t,
-                skill.human_review_status === 'approved' ? 'approved' : 'reviewed',
-                skill.resource_type,
-            ),
-            target: skill.name,
-            timestamp: new Date(skill.human_reviewed_at || skill.updated_at).getTime(),
-            time: new Date(skill.human_reviewed_at || skill.updated_at).toLocaleDateString(language === 'zh' ? 'zh-CN' : 'en-US'),
-        }))
-
-        return [...uploads, ...reviews]
-            .sort((a, b) => b.timestamp - a.timestamp)
-            .slice(0, 10)
-    }, [authoredSkills, reviewedSkills, language, t])
+    }, [activities, language, t])
 
     const shouldShowResourcePanel = activeTab === 'uploads' || activeTab === 'saved'
-    const activeSkills = activeTab === 'saved' ? visibleSaved : visibleUploads
+    const activeSkills = activeTab === 'saved' ? visibleSaved : skills
     const activeLoading = activeTab === 'saved' ? favoritesLoading : loading
 
     const handleFavoriteChange = (skillID: number, favorited: boolean) => {
@@ -215,7 +186,7 @@ function ProfilePage() {
                     </p>
 
                     <div className="profile-badges">
-                        {topUploadedTags.length > 0 ? topUploadedTags.map((tag, idx) => (
+                        {topTags.length > 0 ? topTags.map((tag, idx) => (
                             <span key={tag} className={`profile-badge ${idx === 0 ? 'highlight' : ''}`}>
                                 {tag}
                             </span>
@@ -244,7 +215,7 @@ function ProfilePage() {
                         </div>
                         <div>
                             <p>{t('profile.items')}</p>
-                            <strong>{authoredSkills.length}</strong>
+                            <strong>{stats.total_items}</strong>
                         </div>
                         <div>
                             <p>{t('profile.totalFavorites')}</p>
@@ -257,7 +228,7 @@ function ProfilePage() {
             <section className="profile-workspace">
                 <div className="profile-tabs glass-card">
                     <button className={`profile-tab ${activeTab === 'uploads' ? 'active' : ''}`} onClick={() => setActiveTab('uploads')}>
-                        {t('profile.tabUploads')} <span>{authoredSkills.length}</span>
+                        {t('profile.tabUploads')} <span>{stats.total_items}</span>
                     </button>
                     <button className={`profile-tab ${activeTab === 'saved' ? 'active' : ''}`} onClick={() => setActiveTab('saved')}>
                         {t('profile.tabSaved')} <span>{favoriteSkills.length}</span>
@@ -308,11 +279,35 @@ function ProfilePage() {
                                 <p>{activeTab === 'saved' ? t('profile.noSaved') : t('profile.noUploads')}</p>
                             </div>
                         ) : (
-                            <div className="profile-uploads-grid">
-                                {activeSkills.map(skill => (
-                                    <SkillCard key={skill.id} skill={skill} onFavoriteChange={handleFavoriteChange} />
-                                ))}
-                            </div>
+                            <>
+                                <div className="profile-uploads-grid">
+                                    {activeSkills.map(skill => (
+                                        <SkillCard key={skill.id} skill={skill} onFavoriteChange={handleFavoriteChange} />
+                                    ))}
+                                </div>
+
+                                {activeTab === 'uploads' && totalPages > 1 && (
+                                    <div className="home-pagination" style={{ marginTop: 24 }}>
+                                        <button
+                                            className="page-btn"
+                                            type="button"
+                                            disabled={page <= 1}
+                                            onClick={() => setPage(prev => Math.max(1, prev - 1))}
+                                        >
+                                            {t('common.prev')}
+                                        </button>
+                                        <span className="page-indicator">{page} / {totalPages}</span>
+                                        <button
+                                            className="page-btn"
+                                            type="button"
+                                            disabled={page >= totalPages}
+                                            onClick={() => setPage(prev => Math.min(totalPages, prev + 1))}
+                                        >
+                                            {t('common.next')}
+                                        </button>
+                                    </div>
+                                )}
+                            </>
                         )}
                     </>
                 )}
@@ -320,8 +315,8 @@ function ProfilePage() {
                 {activeTab === 'activity' && (
                     <div className="glass-card profile-activity-card">
                         <div className="profile-timeline">
-                            {activities.length === 0 && <p>{t('profile.noActivity')}</p>}
-                            {activities.map(item => (
+                            {activityItems.length === 0 && <p>{t('profile.noActivity')}</p>}
+                            {activityItems.map(item => (
                                 <div className="profile-timeline-item" key={item.id}>
                                     <span className="profile-timeline-dot" />
                                     <strong>{item.action}</strong>
